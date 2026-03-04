@@ -1,3 +1,5 @@
+from typing import Optional
+
 from IPython.display import SVG
 import matplotlib.pyplot as plt
 import numpy as np
@@ -77,7 +79,7 @@ def resonance_plot(model: sokm,a=0.01,log=False, extra_scope=0.2, show_resonance
     if log: 
         plt.xscale("log")
         plt.yscale("log")
-        ax.set_ylim(bottom=0.1*np.min(response_vals))
+        ax.set_ylim(bottom=0.8*np.min(response_vals))
         plt.ylabel("$\log(A_n)$",fontsize=fs)
     else:
         ax.set_ylim(bottom=0)
@@ -95,25 +97,116 @@ def resonance_plot(model: sokm,a=0.01,log=False, extra_scope=0.2, show_resonance
     plt.show()
 
 
-
-def plot_network(model: sokm):
-    """
     
+def plot_network(
+    model: sokm,
+    vtn_nodes: Optional[np.ndarray]= None,
+    seed=None,
+    edge_weight_key="weight",
+    vtn_node_color="orange",
+    vtn_edge_style="dashed",
+    save_path=None,
+):
     """
+    Plot a network with edge weights represented as thickness and an optional VTN visualization.
 
+    Parameters
+    ----------
+    model : SecondOrderKuramotoModel
+        The Kuramoto model containing the connectivity matrix.
+    seed : int, optional
+        Seed for reproducibility of the layout. Default is None.
+    edge_weight_key : str, optional
+        The key in the edge attributes that represents the weight. Default is "weight".
+    vtn_nodes : list[int], optional
+        List of node indices to highlight. These nodes will be fully connected with dashed edges.
+        Default is None.
+    vtn_node_color : str, optional
+        Color for the highlighted nodes. Default is "red".
+    vtn_edge_style : str, optional
+        Style for the edges connecting the highlighted nodes. Default is "dashed".
+    save_path : str, optional
+        Path to save the figure. If None, the figure is not saved. Default is None.
+
+    Returns
+    -------
+    fig : matplotlib.figure.Figure
+        The Matplotlib figure object.
+    ax : matplotlib.axes.Axes
+        The Matplotlib axes object.
+    """
+    # Create the graph from the connectivity matrix
     G = nx.from_numpy_array(model.connectivity_matrix)
-    fig, ax = plt.subplots(figsize=(14,14))
-    nx.draw(G)
+
+    # Generate positions for the nodes (use seed for reproducibility)
+    pos = nx.spring_layout(G, seed=seed)
+
+    # Extract edge weights
+    edge_weights = [d.get(edge_weight_key, 1.0) for _, _, d in G.edges(data=True)]
+
+    # Normalize edge weights for visual representation
+    max_weight = max(edge_weights) if edge_weights else 1.0
+    edge_widths = [8 * (w / max_weight) for w in edge_weights]  # Scale edge thickness
+    #edge_opacities = [0.2 + 0.8 * (w / max_weight) for w in edge_weights]  # Scale opacity
+
+    # Create the figure and axis
+    fig, ax = plt.subplots(figsize=(7, 7))
+
+    # Draw the base graph
+    nx.draw(
+        G,
+        pos,
+        ax=ax,
+        with_labels=False,
+        node_size=800,
+        node_color="skyblue",
+        font_size=10,
+        font_color="black",
+        edge_color="gray",
+        width=edge_widths,
+        alpha=1.,  # Base opacity for edges
+    )
+
+    # Highlight specific nodes if provided
+    if np.any(vtn_nodes!=None):
+        # Draw highlighted nodes
+        nx.draw_networkx_nodes(
+            G,
+            pos,
+            nodelist=vtn_nodes,
+            node_color=vtn_node_color,
+            node_size=700,
+            ax=ax,
+        )
+
+        # Fully connect the highlighted nodes with dashed edges
+        for i, node1 in enumerate(vtn_nodes):
+            for node2 in vtn_nodes[i + 1 :]:
+                ax.plot(
+                    [pos[node1][0], pos[node2][0]],
+                    [pos[node1][1], pos[node2][1]],
+                    linestyle=vtn_edge_style,
+                    color=vtn_node_color,
+                    alpha=0.7,
+                    linewidth=np.average(edge_widths)
+                )
+
+    # Save the figure if a save path is provided
     save_figure(fig, model, name="network")
+
+    # Show the plot
     plt.show()
+
+    return fig, ax
 
 
 # Example usage
 if __name__ == "__main__":
-    model = sokm.from_random_sparse_graph(num_nodes=8, edge_probability=0.5, damping_coefficient=0.01, seed=42)
+    model = sokm.from_random_sparse_graph(num_nodes=8, edge_probability=0.2, damping_coefficient=0.01)
     model.compute_jacobian()
     model.summary()
-    plot_network(model)
+    vtn_nodes=np.array([1,3,5,6])
+    plot_network(model,vtn_nodes=vtn_nodes)
     resonance_plot(model,log=True, show_resonance_location=True)
     print("oh wow this is new!")
     
