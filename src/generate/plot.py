@@ -30,6 +30,7 @@ def save_figure(fig, model: sokm, name: str) -> str:
         return save_dir
 
 
+
 def resonance_plot(model: sokm,a=0.01,log=False, extra_scope=0.2, show_resonance_location=False, fs=15):
     """
     creates a resonance plot for a network with graph Laplacian L and a perturbation at node k. 
@@ -114,3 +115,5 @@ if __name__ == "__main__":
     model.summary()
     plot_network(model)
     resonance_plot(model,log=True, show_resonance_location=True)
+    print("oh wow this is new!")
+    
