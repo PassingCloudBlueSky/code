@@ -175,7 +175,7 @@ def plot_network(
             pos,
             nodelist=vtn_nodes,
             node_color=vtn_node_color,
-            node_size=700,
+            node_size=800,
             ax=ax,
         )
 

@@ -257,6 +257,8 @@ class SecondOrderKuramotoModel:
             model.jacobian_matrix = np.load(jacobian_path)
         return model
 
+
+
     def summary(self) -> None:
         """
         Print a summary of the current model parameters and state.
