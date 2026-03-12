@@ -1,4 +1,5 @@
 import numpy as np
+import numpy.typing as npt
 import os
 import json
 from param import String
@@ -157,40 +158,52 @@ class ShiftMatrix:
 
     def generate_index_sets(self, eigenvalue_indices: List[int], num_zero_rows: int, num_zero_cols: int) -> Tuple[List[np.ndarray], List[np.ndarray]]:
         """
-        Generate index sets X_k and Y_k for constructing the shift matrix.
-
-        Parameters
-        ----------
-        eigenvalue_indices : list[int]
-            Indices of the eigenvalues to be shifted.
-        num_zero_rows : int
-            Number of rows to remain zero in the shifted matrix.
-        num_zero_cols : int
-            Number of columns to remain zero in the shifted matrix.
-
-        Returns
-        -------
-        Xs, Ys : list[np.ndarray]
-            Index sets for constructing the shift matrix.
-        """
-        if max(eigenvalue_indices) >= len(self.eigenvalues):
-            raise ValueError(f"Providedigenvalue index {max(eigenvalue_indices)} is out of bounds for the Jacobian matrix with {len(self.eigenvalues)} eigenvalues.")
+        system_dim = size of the system
+        eigenvalue_indices = indices of the eigenvalues that we want to shift
+        num_zero_rows = number of zero rows desired
+        num_zero_cols = number of zero columns desired
         
+        
+        generates for a given set of eigenvalues to shift and the number of zero rows and columns 
+        desired index sets Xs={X_k|for all k in eigenvalue_indices} and Ys:={Y_k|for all k in eigenvalue_indices}, 
+        omitting the index 0 which corresponds to the unity eigenvector. Excess degrees of freedom not
+        needed for the realization of constraints are distributed evenly betwen the Xs and Ys.
+        """
+
         self.eigenvalue_indices=np.array(eigenvalue_indices)
-        dim = self.jacobian.shape[0]
-        excess_freedoms = dim - len(eigenvalue_indices) - num_zero_rows - num_zero_cols - 1
+        system_dim = self.jacobian.shape[0]
 
-        if excess_freedoms < 0:
-            raise ValueError(f"Insufficient degrees of freedom for the given constraints, i.e. the number of eigenvalue, zero rows and zero colum indices exceeds system dimension minus one.")
+        # calculating the number of excess degrees of freedom that are not needed for the realization of the constraints
+        excess_freedoms=system_dim-len(eigenvalue_indices)-num_zero_rows-num_zero_cols-1 #-1 bcs the eigenvectors [1,...,1] is not being used
+        if excess_freedoms<0: #catching invalid unputs
+            raise ValueError("Network of size {} is too small for {} degrees of freedom.".format(system_dim,excess_freedoms))
+        
+        # removing eigenvalue_indices from the available indices for X and Y index sets
+        masking_out_eigenvalue_indices=np.full(system_dim-1,True)
+        masking_out_eigenvalue_indices[eigenvalue_indices]=False
+        all_indices=np.arange(0,system_dim-1,dtype=int)
+        indices_available=all_indices[masking_out_eigenvalue_indices]
+        
+        #splitting remaining indices evenly into X and Y base index sets. Simply taking the first x_len indices for X and the rest for Y.
+        x_len=num_zero_rows+int(excess_freedoms/2)
+        X_base=indices_available[0:x_len] 
+        Y_base=indices_available[x_len:system_dim-1-len(eigenvalue_indices)]
+       
+        # inititalizing Xs and Ys arrays to store the index sets for each eigenvalue index in eigenvalue_indices
+        Xs=np.empty(len(eigenvalue_indices),dtype=np.ndarray)
+        Ys=np.empty(len(eigenvalue_indices),dtype=np.ndarray)
+        
+        # creating X and Y index sets for each eigenvalue index in eigenvalue_indices by concatenating the base sets with the appropriate eigenvalue indices 
+        # from eigenvalue_indices and storing them in the Xs and Ys arrays
+        for i in range(len(eigenvalue_indices)): 
+            Xs[i]=np.concatenate((X_base, eigenvalue_indices[:i+1]))
+            Ys[i]=np.concatenate((eigenvalue_indices[i:], Y_base))
 
-        # Generate index sets
-        Xs, Ys = [], []
-        for idx in eigenvalue_indices:
-            Xs.append(np.arange(0, idx + 1))
-            Ys.append(np.arange(idx, dim))
         self.Xs = Xs
         self.Ys = Ys
-        return Xs, Ys
+        print("Generated Xs {Xs} and Ys {Ys}.".format(Xs=Xs, Ys=Ys))
+        return Xs,Ys
+
 
     def calculate_coefficients_one_side(self, shifts: np.ndarray, zero_indices: np.ndarray,  right: bool = True) -> List[np.ndarray]:
         """
@@ -214,10 +227,12 @@ class ShiftMatrix:
         coefficients : list[np.ndarray]
             Coefficients for constructing the shift matrix.
         """
+
+        system_dim = self.jacobian.shape[0]
         coefficients = []
 
         # checking prerequisites
-        if self.Xs== None or self.Ys ==None:
+        if not isinstance(self.Xs,np.ndarray) or not isinstance(self.Ys,np.ndarray):
             raise ValueError("Compute Index sets before computing coefficients.")
             
         if np.shape(shifts)!=np.shape(self.eigenvalue_indices):
@@ -227,20 +242,25 @@ class ShiftMatrix:
             index_sets=self.Ys
         else:
             index_sets=self.Xs
+
         for i, idx in enumerate(self.eigenvalue_indices):
-            masked_vectors = self.eigenvectors[zero_indices][:, index_sets[i]]
-            null_space = la.null_space(masked_vectors)
-            if null_space.size == 0:
-                raise ValueError(f"Null space is empty for eigenvalue index {idx}.")
-            coeff = null_space[:, 0] * shifts[i]
-            coefficients.append(coeff)
+                masked_vectors = self.eigenvectors[zero_indices][:, index_sets[i]]
+                null_space = la.null_space(masked_vectors)
+                if null_space.size == 0:
+                    raise ValueError(f"Null space is empty for eigenvalue index {idx}.")
+
+                relevant_row=null_space[self.Xs[i]==idx,:] if not right else null_space[self.Ys[i]==idx,:]
+                coeff=null_space@relevant_row.T/np.sum(relevant_row**2)
+                if right:
+                    coeff=coeff*shifts[i]
+                coefficients.append(coeff)
         if right:
             self.nus = coefficients
         else:
             self.etas = coefficients
         return coefficients
 
-    def construct_shift_matrix(self, Xs: List[np.ndarray], etas: List[np.ndarray], Ys: List[np.ndarray], nus: List[np.ndarray]) -> np.ndarray:
+    def construct_shift_matrix(self) -> np.ndarray:
         """
         Construct the shift matrix from the coefficients and index sets.
 
@@ -258,12 +278,37 @@ class ShiftMatrix:
         """
         dim = self.jacobian.shape[0]
         S = np.zeros((dim, dim))
-        for i in range(len(Xs)):
-            p = self.eigenvectors[:, Xs[i]] @ etas[i]
-            q = self.eigenvectors[:, Ys[i]] @ nus[i]
+        for i in range(len(self.Xs)):
+            p = self.eigenvectors[:, self.Xs[i]] @ self.etas[i]
+            q = self.eigenvectors[:, self.Ys[i]] @ self.nus[i]
             S += np.outer(p, q)
         self.shift_matrix = S
         return S
+    
+    def construct_from_scratch(self, eigenvalue_indices: List[int], shifts: np.ndarray, zero_rows: npt.NDArray[np.int_], zero_cols: npt.NDArray[np.int_]) -> np.ndarray:
+        """
+        Construct the shift matrix from scratch given the eigenvalue indices, shifts, and zero row/column constraints.
+
+        Parameters
+        ----------
+        eigenvalue_indices : list[int]
+            Indices of the eigenvalues to be shifted.
+        shifts : np.ndarray
+            Desired shifts for the eigenvalues.
+        num_zero_rows : int
+            Number of rows to remain zero in the shifted matrix.
+        num_zero_cols : int
+            Number of columns to remain zero in the shifted matrix.
+
+        Returns
+        -------
+        shift_matrix : np.ndarray
+            The constructed shift matrix.
+        """
+        self.generate_index_sets(eigenvalue_indices, len(zero_rows), len(zero_cols))
+        self.calculate_coefficients_one_side(shifts, zero_rows, right=False)
+        self.calculate_coefficients_one_side(shifts, zero_cols, right=True)
+        return self.construct_shift_matrix()
 
 
     def plot_shift_matrix(self, eigenbasis: bool = False) -> None:
@@ -298,13 +343,15 @@ if __name__ == "__main__":
     shift_matrix_generator = ShiftMatrix(model=model)
 
     # Generate shift matrix
-    eigenvalue_indices = [2, 3]
+    eigenvalue_indices = [1, 2]
     shifts = np.array([-0.5, 0.3])
-    Xs, Ys = shift_matrix_generator.generate_index_sets(eigenvalue_indices, 1, 1) 
-    etas = shift_matrix_generator.calculate_coefficients_one_side( shifts, np.array([6,7]), right=False)
-    nus = shift_matrix_generator.calculate_coefficients_one_side( shifts, np.array([]), right=True)
-    S = shift_matrix_generator.construct_shift_matrix(Xs, etas, Ys, nus)
+    zero_rows = np.array([],dtype=int)
+    zero_cols = np.array([4,5, 6, 7])
+    #zero_rows=np.arange(10,80)
+    #zero_cols=np.array([1])
+    
 
+    S_2=shift_matrix_generator.construct_from_scratch(eigenvalue_indices, shifts, zero_rows, zero_cols)
     # Save and load
     path=shift_matrix_generator.save_to_file()
     loaded_S = shift_matrix_generator.load_from_file(path)
