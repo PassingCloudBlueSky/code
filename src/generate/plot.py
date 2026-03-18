@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 from matplotlib.lines import Line2D
 from matplotlib import colors
-from matplotlib.colors import ListedColormap, Normalize
+from matplotlib.colors import ListedColormap, Normalize, LinearSegmentedColormap
 import numpy as np
 import numpy.ma as ma
 from kuramoto_class import SecondOrderKuramotoModel as sokm 
@@ -16,12 +16,13 @@ import os
 import datetime
 
 # Color definitions
-blue=np.array([0,170,212,100])
-darkblue = np.array([0, 68, 170, 100])
-purple = np.array([205, 135, 222, 100])
-red = np.array([211, 95, 95, 100])
-orange = np.array([255, 153, 85, 100])
-green = np.array([44, 160, 90, 100])
+blue=np.array([0,170,212,100])/256
+darkblue = np.array([0, 68, 170, 100])/256
+purple = np.array([205, 135, 222, 100])/256
+red = np.array([211, 95, 95, 100])/256
+orange = np.array([255, 153, 85, 100])/256
+green = np.array([44, 160, 90, 100])/256
+
 
 
 def create_cmap_from_white(color, cmap_length=256):
@@ -29,10 +30,11 @@ def create_cmap_from_white(color, cmap_length=256):
     Create a colormap transitioning from white to the given color.
     """
     cmap_vals = np.ones((cmap_length, 4))
-    cmap_vals[:, 0] = np.linspace(1, color[0] / 256, cmap_length)
-    cmap_vals[:, 1] = np.linspace(1, color[1] / 256, cmap_length)
-    cmap_vals[:, 2] = np.linspace(1, color[2] / 256, cmap_length)
-    cmap_vals[:30, 3] = np.linspace(0, 1, 30)
+    cmap_vals[:, 0] = np.linspace(1, color[0], cmap_length)
+    cmap_vals[:, 1] = np.linspace(1, color[1], cmap_length)
+    cmap_vals[:, 2] = np.linspace(1, color[2], cmap_length)
+    cmap_vals[:, 3] = np.sqrt(np.linspace(0, 0.9, cmap_length))
+    #cmap_vals[:30, 3] = np.linspace(0, 1, 30)
     return ListedColormap(cmap_vals)
 
 
@@ -45,16 +47,17 @@ def save_figure(fig, save_dir: str, name: str) -> str:
         """
 
         
-        save_dir = os.path.join(save_dir, "plots")
         os.makedirs(save_dir, exist_ok=True)
 
         # creating plot path/name
-        date_str = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S_")
-        save_path=os.path.join(save_dir, date_str+name)
+        #date_str = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S_")
+        #save_path=os.path.join(save_dir, date_str+name)
+        save_path=os.path.join(save_dir, name)
 
         fig.savefig(save_path,bbox_inches='tight',format="svg", dpi=300)
         
         return save_dir
+
 
 
 
@@ -122,7 +125,9 @@ def resonance_plot(model: sokm,a=0.01,log=False, extra_scope=0.1, show_resonance
     if model.current_dir == None:
         model.save_parameters()
 
-    save_figure(fig, model.current_dir, name="resonance_plot.svg")
+
+    save_dir = os.path.join(model.current_dir, "plots")
+    save_figure(fig, save_dir, name="resonance_plot.svg")
     plt.show()
 
 
@@ -223,7 +228,9 @@ def plot_network(
     # Save the figure 
     if model.current_dir == None:
         model.save_parameters()
-    save_figure(fig, model.current_dir, name="network.svg")
+    
+    save_dir = os.path.join(model.current_dir, "plots")
+    save_figure(fig, save_dir, name="network.svg")
 
     # Show the plot
     plt.show()
@@ -232,11 +239,24 @@ def plot_network(
 
 
 
-def add_pcolormesh(ax, matrix,cmap,norm=None):
+def add_pcolormesh(ax, matrix, color=blue, min_max=None, log=True, cutoff=1e-5, alpha=0.7):
     """
-    Helper function to add a pcolormesh to an axis with consistent styling.
+    Helper function to add a pcolormesh to an axis for consistent styling across higher level functions.
     """
-    im = ax.pcolormesh(matrix, cmap=cmap, norm=norm)
+
+    if log:
+        matrix = np.abs(matrix)
+
+    if min_max==None:
+        min_max = (np.min(matrix), np.max(matrix))
+    
+    # creating log norm if log scaling is desired, with cutoff to avoid issues with log(0)
+    if log:
+        log_norm=colors.LogNorm(vmin=min_max[0] if min_max[0]>cutoff else cutoff, vmax=min_max[1], clip=True)
+
+    # adding plot to axis
+    print("Shape of matrix:", np.shape(matrix))
+    im = ax.pcolormesh(np.flip(matrix,axis=0), cmap=create_cmap_from_white(color), norm=log_norm if log else None)
     ax.set_xticks([])
     ax.set_yticks([])
     for axis in ['top','bottom','left','right']:
@@ -246,13 +266,16 @@ def add_pcolormesh(ax, matrix,cmap,norm=None):
 
 
 
-def visualize_matrix(left_vec=None, right_vec=None, 
+def visualize_matrix(left_vec=None, 
+                     right_vec=None, 
                      matrix=None, 
-                     min_max=None, 
-                     cmap=create_cmap_from_white(blue), 
-                     absolute_values=True, 
+                     min_max=None,
+                     name=None,
+                     save_dir=None,
+                     color=blue,
                      log=True, 
-                     cutoff=1e-5):
+                     cutoff=1e-5,
+                     axs=None):
     """
     Visualize the outer product of two vectors left_vec and right_vec, along with the vectors themselves if left_vec and right_vec are provided.
     If matrix is provded, it visualizes only the matrix provided. The color scale can be adjusted with min_max and cmap.
@@ -274,39 +297,40 @@ def visualize_matrix(left_vec=None, right_vec=None,
    # Input validation
     if (left_vec is None or right_vec is None) and matrix is None:
         raise ValueError("At least left_vec, right_vec, or matrix must be provided.")
+    
+    # preparatoin of data
     matrix = np.outer(left_vec, right_vec) if matrix is None else matrix
-    dim=matrix.shape[0]
-    if log is True: absolute_values=True 
-    if absolute_values:
-        if left_vec is not None and right_vec is not None:
-            right_vec=np.abs(right_vec)
-            left_vec=np.abs(left_vec)
-        matrix=np.abs(matrix)
-
-    # Initialization
-    fig, axes = plt.subplots(2,2, width_ratios=(1, dim), height_ratios=( 1,dim), figsize=(dim+2, dim+2), gridspec_kw=dict(hspace=1/dim, wspace=1/dim))
-    
-
-    # colormap setup
-    if min_max==None:
-        if left_vec is not None and right_vec is not None:
-            max_val = max(np.max(arr) for arr in [left_vec, right_vec, matrix])
-            min_val = min(np.min(arr) for arr in [left_vec, right_vec, matrix])
-        else:
-            max_val = np.max(matrix)
-            min_val = np.min(matrix)
-    else:
-        min_val, max_val = min_max
-    
-    # creating log norm if log scaling is desired, with cutoff to avoid issues with log(0)
     if log:
-        log_norm=colors.LogNorm(vmin=min_val if min_val>cutoff else cutoff, vmax=max_val, clip=True)
+        left_vec=np.abs(left_vec) if left_vec is not None else None
+        right_vec=np.abs(right_vec) if right_vec is not None else None
+        matrix=np.abs(matrix)
+    dim=matrix.shape[0]
+    
+    # Finding global min and max for consistent color scaling across all three plots if not provided. 
+    # For matrices without left_vec and right_vec add_pcolormesh handles the scaling in cases where min_max is not provided.
+    if min_max==None and left_vec is not None and right_vec is not None:
+        max_val = max(np.max(arr) for arr in [left_vec, right_vec, matrix])
+        min_val = min(np.min(arr) for arr in [left_vec, right_vec, matrix])
+        min_max = (min_val, max_val)
+    
 
     # Plotting
-    im=add_pcolormesh(axes[1,1], matrix, cmap=cmap, norm=log_norm if log else None)
+    if axs is None:
+        fig, axes = plt.subplots(2,2, width_ratios=(1, dim), height_ratios=( 1,dim), figsize=(dim+2, dim+2), gridspec_kw=dict(hspace=1/dim, wspace=1/dim))
+    else:
+        axes=axs
+
+    
+    im=add_pcolormesh(axes[1,1], matrix, color=color, min_max=min_max, log=log, cutoff=cutoff)
     if left_vec is not None and right_vec is not None:
-        add_pcolormesh(axes[0,1], right_vec[None, :], cmap=cmap, norm=log_norm if log else None)
-        add_pcolormesh(axes[1,0], left_vec[:, None], cmap=cmap, norm=log_norm if log else None)
+        # Reshaping vectors to ensure they are 2D and oriented correctly for the plot
+        right_vec=right_vec[None,:] if right_vec.ndim==1 else right_vec
+        left_vec=left_vec[:,None] if left_vec.ndim==1 else left_vec
+        right_vec=right_vec.T if right_vec.shape[0]>right_vec.shape[1] else right_vec
+        left_vec=left_vec.T if left_vec.shape[0]<left_vec.shape[1] else left_vec
+
+        add_pcolormesh(axes[0,1], right_vec, color=color, min_max=min_max, log=log, cutoff=cutoff)
+        add_pcolormesh(axes[1,0], left_vec, color=color, min_max=min_max, log=log, cutoff=cutoff)
     else:
         axes[0,1].axis('off')
         axes[1,0].axis('off')
@@ -318,39 +342,78 @@ def visualize_matrix(left_vec=None, right_vec=None,
     cbar.ax.tick_params(labelsize=25)
 
     # save figure
-    plt.savefig("pcolormesh.svg", format="svg", dpi=300, bbox_inches='tight')
-    plt.show()
-    return fig, axes
+    if axs is None:
+        if save_dir is None:
+            save_dir=os.path.join(os.getcwd(),"unorganized_plots")
+        save_figure(fig, save_dir=save_dir, name=name if name is not None else "pcolormesh.svg")
+
+    if axs is None:
+        return fig, axes
 
 
-
-
-def visualize_multiple(sm: ShiftMatrix, in_eigenspace=True, log=True, fs=20):
+def construction_visualization(shift_matrix_obj:ShiftMatrix, in_eigenspace=False, log=True, fs=20, cutoff=1e-4):
     """
-    Visualize the shift matrix and its components in the physical basis.
+    Visualize the construction of the shift matrix by plotting the Jacobian, the individual shift components, and the final shift matrix.
 
     Parameters
     ----------
-    sm : ShiftMatrix
+    shift_matrix : ShiftMatrix
         The ShiftMatrix object containing the shift matrix and related data.
-    log : bool, optional
-        Whether to use logarithmic scaling for the visualization. Default is True.
     fs : int, optional
         Font size for the plot. Default is 20.
     """
-    if sm.shift_matrix is None:
-        raise ValueError("Shift matrix has not been constructed.")
+
+    if shift_matrix_obj.shift_matrix is None:
+        raise ValueError("Shift matrix has to be constructed beforehand to be visualized.")
 
     # Extract data from the ShiftMatrix object
-    S = sm.shift_matrix
-    Xs = sm.Xs
-    Ys = sm.Ys
-    etas = sm.etas
-    nus = sm.nus
-    jacobian = sm.jacobian
-    eigvecs = sm.eigenvectors
+    left_generators, right_generators = shift_matrix_obj.calculate_shift_matrix_generators(in_eigenspace=in_eigenspace)
+    individual_shift_matrices= [np.outer(p_i, q_i) for p_i, q_i in zip(left_generators, right_generators)]
+    if in_eigenspace:
+        jacobian= np.diag(shift_matrix_obj.eigenvalues)
+    else:
+        jacobian = shift_matrix_obj.jacobian
+    dim=jacobian.shape[0]
+    if shift_matrix_obj.current_dir == None:
+        shift_matrix_obj.save_parameters()
+    save_dir=os.path.join(shift_matrix_obj.current_dir,"plots")
 
-    return 
+    # If log scaling is desired, take the absolute value of the data in order to avoid evaluing log of negative values
+    if log:
+        left_generators = [np.abs(vec) for vec in left_generators]
+        right_generators = [np.abs(vec) for vec in right_generators]
+        individual_shift_matrices = [np.abs(mat) for mat in individual_shift_matrices]
+        jacobian = np.abs(jacobian)
+
+    # Calculate global min and max for consistent color intensities across all plots
+    global_max_val = max(np.max(arr) for arr in [np.concatenate(left_generators), np.concatenate(right_generators), np.concatenate(individual_shift_matrices), jacobian])
+    global_min_val = min(np.min(arr) for arr in [np.concatenate(left_generators), np.concatenate(right_generators), np.concatenate(individual_shift_matrices), jacobian])
+    min_max = (global_min_val, global_max_val)
+
+    # create plot instances to accumulate the layers of each visualization step for log and physical space
+    fig_layered, axes_layered = plt.subplots(2,2, width_ratios=(1, dim), height_ratios=( 1,dim), figsize=(dim+2, dim+2), gridspec_kw=dict(hspace=1/dim, wspace=1/dim))
+    axes_layered[0,1].axis('off')
+    axes_layered[1,0].axis('off')
+    axes_layered[0,0].axis('off')
+
+    # Visualize jacobian in eigenspace and physical space
+    add_pcolormesh(axes_layered[1,1],jacobian, color=darkblue, log=log, cutoff=cutoff, min_max=min_max)
+    visualize_matrix(matrix=jacobian, color=darkblue, log=log, cutoff=cutoff, name=f"{"eigenspace" if in_eigenspace else "physical"}_jacobian.svg", save_dir=save_dir, min_max=min_max)
+    
+    # Visualize individual shift matrices in eigen and physical space
+    color_range=[purple, red, orange]
+    individual_shift_colors_cmap = LinearSegmentedColormap.from_list("shift_cmap", color_range, N=256)
+
+    n_individual_shift_matrices=len(individual_shift_matrices)
+    for index in range(n_individual_shift_matrices):
+        print(f"Visualizing shift component {index+1} in {'eigen' if in_eigenspace else 'physical'} space...")
+        color=individual_shift_colors_cmap (index / (n_individual_shift_matrices - 1))
+        add_pcolormesh(axes_layered[1,1], individual_shift_matrices[index], color=color, log=log, cutoff=cutoff, min_max=min_max)
+        visualize_matrix(left_vec=left_generators[index], right_vec=right_generators[index], color=color, log=log, cutoff=cutoff, name=f"{"eigenspace" if in_eigenspace else "physical"}_shift_component_{index+1}.svg", save_dir=save_dir, min_max=min_max)
+    
+    # save layered figure
+    save_figure(fig_layered, save_dir=save_dir, name=f"{"eigenspace" if in_eigenspace else "physical"}_layered.svg")
+    
 
 
 def visualize_shift_matrixes_save(shift_matrix_obj: ShiftMatrix, log=True, fs=20):
@@ -467,17 +530,19 @@ if __name__ == "__main__":
     shift_matrix_obj = ShiftMatrix(model=model)
 
     # Generate a shift matrix
-    eigenvalue_indices = [1, 2]
-    shifts = np.array([-0.5, 0.3])
-    zero_rows = np.array([8, 9])
-    zero_cols = np.array([8, 9])
+    eigenvalue_indices = [1, 2, 3, 4]
+    shifts = np.array([-0.5, 0.3,.25,0.4])
+    zero_rows = np.array([6,7,8,9])
+    zero_cols = np.array([8])
     shift_matrix_obj.construct_from_scratch(eigenvalue_indices, shifts, zero_rows, zero_cols)
 
     # Visualize the shift matrix
    # visualize_shift_matrixes_save(shift_matrix_obj, log=True)
     #visualize_shift_matrixes_eigenspace_save(shift_matrix_obj, log=True)
-    visualize_matrix(matrix=shift_matrix_obj.shift_matrix)
-    #a=np.random.rand(10)**3
-    #b=np.random.rand(10)
-    #visualize_matrix(left_vec=a, right_vec=b, matrix=None, min_max=None, cmap=create_cmap_from_white(green), absolute_values=True)
+    #isualize_matrix(matrix=shift_matrix_obj.shift_matrix)
+    a=np.random.rand(10)**3
+    b=np.random.rand(10)
+    visualize_matrix(left_vec=a[None,:], right_vec=b[:, None], matrix=None, min_max=None, color=green)
+    construction_visualization(shift_matrix_obj, in_eigenspace=False, log=True, fs=20, cutoff=1e-5)
+    construction_visualization(shift_matrix_obj, in_eigenspace=True, log=True, fs=20, cutoff=1e-5)
     

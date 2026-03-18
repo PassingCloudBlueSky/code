@@ -260,30 +260,63 @@ class ShiftMatrix:
             self.etas = coefficients
         return coefficients
 
-    def construct_shift_matrix(self) -> np.ndarray:
-        """
-        Construct the shift matrix from the coefficients and index sets.
 
+    def calculate_shift_matrix_generators(self, in_eigenspace=False) -> List[np.ndarray]:
+        """
+        Calculate individual shift matrices corresponding to each desired eigenvalue shift.  
+        If in_eigenspace is True, the individual shift matrices are calculated in the eigenbasis of the Jacobian, 
+        otherwise they are calculated in the physical basis. 
+        
         Parameters
         ----------
-        Xs, Ys : list[np.ndarray]
-            Index sets for constructing the shift matrix.
-        etas, nus : list[np.ndarray]
-            Coefficients for constructing the shift matrix.
+            in_eigenspace : bool
+                Whether to calculate the individual shift matrices in the eigenbasis of the Jacobian.
+
+        Returns
+        -------
+            left_generators : list[np.ndarray]
+                List of left spanning vectors for the individual shift matrices in the chosen basis.
+            right_generators : list[np.ndarray]
+                List of right spanning vectors for the individual shift matrices in the chosen basis.
+        """
+        if self.etas is None or self.nus is None:
+            raise ValueError("Coefficients must be calculated before constructing individual shift matrices.")
+        
+        left_generators= []
+        right_generators= []
+        # looping over all individual shift matrices
+        for i in range(len(self.eigenvalue_indices)):
+
+            if in_eigenspace:
+                dim=self.jacobian.shape[0]
+                p=np.zeros(dim)
+                q=np.zeros(dim)
+                p[self.Xs[i],None]=self.etas[i]
+                q[self.Ys[i],None]=self.nus[i]
+                left_generators.append(p)
+                right_generators.append(q)
+            else:
+                p = self.eigenvectors[:, self.Xs[i]] @ self.etas[i]
+                q = self.eigenvectors[:, self.Ys[i]] @ self.nus[i]
+                left_generators.append(p)
+                right_generators.append(q)
+        
+        return left_generators, right_generators
+
+
+    def construct_shift_matrix(self) -> np.ndarray:
+        """
+        Construct the final shift matrix by summing the individual shift matrices.
 
         Returns
         -------
         shift_matrix : np.ndarray
             The constructed shift matrix.
         """
-        dim = self.jacobian.shape[0]
-        S = np.zeros((dim, dim))
-        for i in range(len(self.Xs)):
-            p = self.eigenvectors[:, self.Xs[i]] @ self.etas[i]
-            q = self.eigenvectors[:, self.Ys[i]] @ self.nus[i]
-            S += np.outer(p, q)
-        self.shift_matrix = S
-        return S
+        p, q = self.calculate_shift_matrix_generators()
+        self.shift_matrix = sum(np.outer(p_i, q_i) for p_i, q_i in zip(p, q))
+
+        return self.shift_matrix
     
     def construct_from_scratch(self, eigenvalue_indices: List[int], shifts: np.ndarray, zero_rows: npt.NDArray[np.int_], zero_cols: npt.NDArray[np.int_]) -> np.ndarray:
         """
@@ -345,8 +378,8 @@ if __name__ == "__main__":
     # Generate shift matrix
     eigenvalue_indices = [1, 2]
     shifts = np.array([-0.5, 0.3])
-    zero_rows = np.array([],dtype=int)
-    zero_cols = np.array([4,5, 6, 7])
+    zero_rows = np.array([1,2],dtype=int)
+    zero_cols = np.array([4,5])
     #zero_rows=np.arange(10,80)
     #zero_cols=np.array([1])
     
