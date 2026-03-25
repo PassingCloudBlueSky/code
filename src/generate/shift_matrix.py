@@ -387,6 +387,7 @@ if __name__ == "__main__":
     S_2=shift_matrix_generator.construct_from_scratch(eigenvalue_indices, shifts, zero_rows, zero_cols)
     # Save and load
     path=shift_matrix_generator.save_to_file()
+    print(path)
     loaded_S = shift_matrix_generator.load_from_file(path)
 
     # Plot

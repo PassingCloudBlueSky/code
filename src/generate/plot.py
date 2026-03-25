@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 from matplotlib.lines import Line2D
 from matplotlib import colors
+from matplotlib import rc
 from matplotlib.colors import ListedColormap, Normalize, LinearSegmentedColormap
 import numpy as np
 import numpy.ma as ma
@@ -13,8 +14,8 @@ from shift_matrix import ShiftMatrix
 import scipy
 import networkx as nx
 import os
-import datetime
-
+import svgutils.transform as sg
+import svgutils.compose as sc
 # Color definitions
 blue=np.array([0,170,212,100])/256
 darkblue = np.array([0, 68, 170, 100])/256
@@ -56,7 +57,7 @@ def save_figure(fig, save_dir: str, name: str) -> str:
 
         fig.savefig(save_path,bbox_inches='tight',format="svg", dpi=300)
         
-        return save_dir
+        return save_path
 
 
 
@@ -239,12 +240,12 @@ def plot_network(
 
 
 
-def add_pcolormesh(ax, matrix, color=blue, min_max=None, log=True, cutoff=1e-5, alpha=0.7):
+def add_pcolormesh(ax, matrix, color=blue, min_max=None, log=True, cutoff=1e-5, alpha=0.7, absolute=False):
     """
     Helper function to add a pcolormesh to an axis for consistent styling across higher level functions.
     """
 
-    if log:
+    if log or absolute:
         matrix = np.abs(matrix)
 
     if min_max==None:
@@ -252,15 +253,17 @@ def add_pcolormesh(ax, matrix, color=blue, min_max=None, log=True, cutoff=1e-5, 
     
     # creating log norm if log scaling is desired, with cutoff to avoid issues with log(0)
     if log:
-        log_norm=colors.LogNorm(vmin=min_max[0] if min_max[0]>cutoff else cutoff, vmax=min_max[1], clip=True)
+        norm=colors.LogNorm(vmin=min_max[0] if min_max[0]>cutoff else cutoff, vmax=min_max[1], clip=True)
+    else:
+        norm=Normalize(vmin=min_max[0], vmax=min_max[1], clip=True)
 
     # adding plot to axis
     print("Shape of matrix:", np.shape(matrix))
-    im = ax.pcolormesh(np.flip(matrix,axis=0), cmap=create_cmap_from_white(color), norm=log_norm if log else None)
+    im = ax.pcolormesh(np.flip(matrix,axis=0), cmap=create_cmap_from_white(color), norm=norm)
     ax.set_xticks([])
     ax.set_yticks([])
     for axis in ['top','bottom','left','right']:
-        ax.spines[axis].set_linewidth(1.2)
+        ax.spines[axis].set_linewidth(0.5)
     return im
 
 
@@ -273,9 +276,12 @@ def visualize_matrix(left_vec=None,
                      name=None,
                      save_dir=None,
                      color=blue,
-                     log=True, 
+                     log=True,
+                     absolute=False, 
                      cutoff=1e-5,
-                     axs=None):
+                     axs=None,
+                     fs=20,
+                     label=["left vec", "right vec", "matrix"]):
     """
     Visualize the outer product of two vectors left_vec and right_vec, along with the vectors themselves if left_vec and right_vec are provided.
     If matrix is provded, it visualizes only the matrix provided. The color scale can be adjusted with min_max and cmap.
@@ -300,7 +306,7 @@ def visualize_matrix(left_vec=None,
     
     # preparatoin of data
     matrix = np.outer(left_vec, right_vec) if matrix is None else matrix
-    if log:
+    if log or absolute:
         left_vec=np.abs(left_vec) if left_vec is not None else None
         right_vec=np.abs(right_vec) if right_vec is not None else None
         matrix=np.abs(matrix)
@@ -316,12 +322,13 @@ def visualize_matrix(left_vec=None,
 
     # Plotting
     if axs is None:
-        fig, axes = plt.subplots(2,2, width_ratios=(1, dim), height_ratios=( 1,dim), figsize=(dim+2, dim+2), gridspec_kw=dict(hspace=1/dim, wspace=1/dim))
+        fig, axes = plt.subplots(2,2, width_ratios=(1, dim), height_ratios=( 1,dim), figsize=((dim+2)/10, (dim+2)/10), gridspec_kw=dict(hspace=1/dim, wspace=1/dim))
     else:
         axes=axs
 
     
-    im=add_pcolormesh(axes[1,1], matrix, color=color, min_max=min_max, log=log, cutoff=cutoff)
+    im=add_pcolormesh(axes[1,1], matrix, color=color, min_max=min_max, log=log, absolute=absolute, cutoff=cutoff)
+    axes[1,1].set_xlabel(label[2] if len(label)==3 else label,fontsize=fs)
     if left_vec is not None and right_vec is not None:
         # Reshaping vectors to ensure they are 2D and oriented correctly for the plot
         right_vec=right_vec[None,:] if right_vec.ndim==1 else right_vec
@@ -329,29 +336,33 @@ def visualize_matrix(left_vec=None,
         right_vec=right_vec.T if right_vec.shape[0]>right_vec.shape[1] else right_vec
         left_vec=left_vec.T if left_vec.shape[0]<left_vec.shape[1] else left_vec
 
-        add_pcolormesh(axes[0,1], right_vec, color=color, min_max=min_max, log=log, cutoff=cutoff)
-        add_pcolormesh(axes[1,0], left_vec, color=color, min_max=min_max, log=log, cutoff=cutoff)
+        add_pcolormesh(axes[0,1], right_vec, color=color, min_max=min_max, log=log, absolute=absolute, cutoff=cutoff)
+        add_pcolormesh(axes[1,0], left_vec, color=color, min_max=min_max, log=log, absolute=absolute, cutoff=cutoff)
+
+        axes[0,1].set_title(label[1],fontsize=fs)
+        axes[1,0].set_ylabel(label[0],fontsize=fs)
     else:
         axes[0,1].axis('off')
+        axes[0,1].set_title(" ",fontsize=fs)
         axes[1,0].axis('off')
+        axes[1,0].set_ylabel(" ",fontsize=fs)
     axes[0,0].axis('off')
 
     # Add colorbar
     cbar_ax = fig.add_axes((0.95, 0.11, 0.05, 0.77))
     cbar=fig.colorbar(im, cax=cbar_ax)
-    cbar.ax.tick_params(labelsize=25)
+    cbar.outline.set_linewidth(0.5)
+    cbar.ax.tick_params(labelsize=fs-1)
 
     # save figure
     if axs is None:
         if save_dir is None:
             save_dir=os.path.join(os.getcwd(),"unorganized_plots")
-        save_figure(fig, save_dir=save_dir, name=name if name is not None else "pcolormesh.svg")
-
-    if axs is None:
-        return fig, axes
+        return save_figure(fig, save_dir=save_dir, name=name if name is not None else "pcolormesh.svg")
 
 
-def construction_visualization(shift_matrix_obj:ShiftMatrix, in_eigenspace=False, log=True, fs=20, cutoff=1e-4):
+
+def construction_visualization(shift_matrix_obj:ShiftMatrix, in_eigenspace=False, log=True, absolute=False, fs=8, cutoff=1e-4):
     """
     Visualize the construction of the shift matrix by plotting the Jacobian, the individual shift components, and the final shift matrix.
 
@@ -379,7 +390,7 @@ def construction_visualization(shift_matrix_obj:ShiftMatrix, in_eigenspace=False
     save_dir=os.path.join(shift_matrix_obj.current_dir,"plots")
 
     # If log scaling is desired, take the absolute value of the data in order to avoid evaluing log of negative values
-    if log:
+    if log or absolute:
         left_generators = [np.abs(vec) for vec in left_generators]
         right_generators = [np.abs(vec) for vec in right_generators]
         individual_shift_matrices = [np.abs(mat) for mat in individual_shift_matrices]
@@ -391,15 +402,21 @@ def construction_visualization(shift_matrix_obj:ShiftMatrix, in_eigenspace=False
     min_max = (global_min_val, global_max_val)
 
     # create plot instances to accumulate the layers of each visualization step for log and physical space
-    fig_layered, axes_layered = plt.subplots(2,2, width_ratios=(1, dim), height_ratios=( 1,dim), figsize=(dim+2, dim+2), gridspec_kw=dict(hspace=1/dim, wspace=1/dim))
+    fig_layered, axes_layered = plt.subplots(2,2, width_ratios=(1, dim), height_ratios=( 1,dim), figsize=((dim+2)/10, (dim+2)/10), gridspec_kw=dict(hspace=1/dim, wspace=1/dim))
+    axes_layered[0,1].set_title(" ",fontsize=fs)
+    axes_layered[1,0].set_ylabel(" ",fontsize=fs)
     axes_layered[0,1].axis('off')
     axes_layered[1,0].axis('off')
     axes_layered[0,0].axis('off')
 
+    # create empty list of saving_paths
+    saving_paths=[]
+
     # Visualize jacobian in eigenspace and physical space
-    add_pcolormesh(axes_layered[1,1],jacobian, color=darkblue, log=log, cutoff=cutoff, min_max=min_max)
-    visualize_matrix(matrix=jacobian, color=darkblue, log=log, cutoff=cutoff, name=f"{"eigenspace" if in_eigenspace else "physical"}_jacobian.svg", save_dir=save_dir, min_max=min_max)
+    add_pcolormesh(axes_layered[1,1],jacobian, color=darkblue, log=log, absolute=absolute, cutoff=cutoff, min_max=min_max)
+    saving_paths.append(visualize_matrix(matrix=jacobian, label="J", color=darkblue, log=log, absolute=absolute, fs=fs, cutoff=cutoff, name=f"{"eigenspace" if in_eigenspace else "physical"}_jacobian.svg", save_dir=save_dir, min_max=min_max) )
     
+
     # Visualize individual shift matrices in eigen and physical space
     color_range=[purple, red, orange]
     individual_shift_colors_cmap = LinearSegmentedColormap.from_list("shift_cmap", color_range, N=256)
@@ -408,141 +425,143 @@ def construction_visualization(shift_matrix_obj:ShiftMatrix, in_eigenspace=False
     for index in range(n_individual_shift_matrices):
         print(f"Visualizing shift component {index+1} in {'eigen' if in_eigenspace else 'physical'} space...")
         color=individual_shift_colors_cmap (index / (n_individual_shift_matrices - 1))
-        add_pcolormesh(axes_layered[1,1], individual_shift_matrices[index], color=color, log=log, cutoff=cutoff, min_max=min_max)
-        visualize_matrix(left_vec=left_generators[index], right_vec=right_generators[index], color=color, log=log, cutoff=cutoff, name=f"{"eigenspace" if in_eigenspace else "physical"}_shift_component_{index+1}.svg", save_dir=save_dir, min_max=min_max)
+
+        p="p"
+        q="q"
+        labels = [rf"$\vec{{{p}}}_{{{index+1}}}$", rf"$\vec{{{q}}}_{{{index+1}}}^T$", f"$S_{index+1}\\coloneq\\vec{{{p}}}_{{{index+1}}}\\vec{{{q}}}_{{{index+1}}}^T$"]
+
+        add_pcolormesh(axes_layered[1,1], individual_shift_matrices[index], color=color, log=log, absolute=absolute, cutoff=cutoff, min_max=min_max)
+        saving_paths.append(visualize_matrix(left_vec=left_generators[index], right_vec=right_generators[index],label=labels, color=color, log=log, fs=fs, cutoff=cutoff, name=f"{"eigenspace" if in_eigenspace else "physical"}_shift_component_{index+1}.svg", save_dir=save_dir, min_max=min_max))
     
+    axes_layered[1,1].set_xlabel(r"$J+\sum_{i}S_i$", fontsize=fs)
     # save layered figure
-    save_figure(fig_layered, save_dir=save_dir, name=f"{"eigenspace" if in_eigenspace else "physical"}_layered.svg")
+    saving_paths.append(save_figure(fig_layered, save_dir=save_dir, name=f"{"eigenspace" if in_eigenspace else "physical"}_layered.svg"))
+    plt.close(fig_layered)
+    return saving_paths
+
+
+def construction_publication_ready(shift_matrix_obj:ShiftMatrix, log=True, absolute=True,fs=8):
     
 
+    file_paths_physical=construction_visualization(shift_matrix_obj, in_eigenspace=False, log=log, absolute=absolute, fs=fs, cutoff=1e-4)
+    file_paths_eigenspace=construction_visualization(shift_matrix_obj, in_eigenspace=True, log=log, absolute=absolute, fs=fs, cutoff=1e-4)
+    
+    #create new SVG figure
+    fig = sg.SVGFigure("17cm", "6.5cm")
+    #fig.append(sc.Grid(10,10))
 
-def visualize_shift_matrixes_save(shift_matrix_obj: ShiftMatrix, log=True, fs=20):
-    """
-    Visualize the shift matrix and its components in the physical basis.
+    # loop to load and add all the generated SVGs to the figure, with appropriate positioning and scaling
+    symbols=[]
+    def add_svg_to_figure(fig,file_paths, second_row=False):
+        
+        y_0 = 64 if second_row else 10
+        for i,path in enumerate(file_paths):
+            fig_part = sg.fromfile(path)
+            plot = fig_part.getroot()
+            x_0 = i*70
+            if i==0:
+                x_0 += 10
+            
+            plot.moveto(x_0, y_0, scale_x=0.6, scale_y=0.6)
+            fig.append([plot])
 
-    Parameters
-    ----------
-    shift_matrix_obj : ShiftMatrix
-        The ShiftMatrix object containing the shift matrix and related data.
-    log : bool, optional
-        Whether to use logarithmic scaling for the visualization. Default is True.
-    fs : int, optional
-        Font size for the plot. Default is 20.
-    """
-    if shift_matrix_obj.shift_matrix is None:
-        raise ValueError("Shift matrix has not been constructed.")
+            # plotting the subfigure reference for the caption, with a bit of extra space for the first and last plot for coherent aesthetics
+            if  i==len(file_paths)-1:
+                x_0 -= 10
+            elif i==0:
+                x_0 -=8
+            reference_offset=len(file_paths)+1 if second_row else 1
+            reference=sg.TextElement(x_0+10,y_0+15, chr(ord('`')+i+reference_offset)+")", size=6)
+            if i<len(file_paths)-2:
+                plus=sg.TextElement(x_0+65,y_0+32,"+",size=6)
+                symbols.append(plus)
+                #fig.append([plus])
+            elif i==len(file_paths)-2:
+                equal=sg.TextElement(x_0+65,y_0+32,"=",size=6)
+                symbols.append(equal)
+                #fig.append([equal])
+            fig.append([reference])
+        
+        space=sg.TextElement(10,y_0+50, "Physical space" if second_row else "Eigenspace", size=6)
+        space.rotate(270, 10, y_0+50)
+        fig.append([space])
+        fig.append(symbols)
+    
+    add_svg_to_figure(fig, file_paths_eigenspace, second_row=False)
+    add_svg_to_figure(fig, file_paths_physical, second_row=True)
 
-    # Extract data from the ShiftMatrix object
-    S = shift_matrix_obj.shift_matrix
-    Xs = shift_matrix_obj.Xs
-    Ys = shift_matrix_obj.Ys
-    etas = shift_matrix_obj.etas
-    nus = shift_matrix_obj.nus
-    jacobian = shift_matrix_obj.jacobian
-    eigvecs = shift_matrix_obj.eigenvectors
+    line=sc.Line([(5,66),(45+70*(len(file_paths_physical)-1),66)],width=0.8)
+    fig.append([line])
 
-    # Initialize plots
-    colors = [darkblue, purple, red, orange]
-    titles = ["$\mathcal{L}$", "$S_1$", "$S_2$", "$S_3$", "$\mathcal{L}+S$"]
-    cbars = ["$\mathrm{log}_{10}(\mathcal{L})$", "$\mathrm{log}_{10}(S_1)$", "$\mathrm{log}_{10}(S_2)$", "$\mathrm{log}_{10}(S_3)$"]
-    file_names = ["L", "S1", "S2", "S3", "LnS"]
+    save_dir=os.path.join(shift_matrix_obj.current_dir,"plots\\combined.svg")
+    fig.save(save_dir)
+    return save_dir
 
-    # Visualize the Jacobian (jacobian)
-    fig, ax = plt.subplots(1, 1, figsize=(7, 5.2))
-    m_jacobian = ma.masked_array(jacobian, mask=(np.abs(jacobian) < 1e-10))
-    visualize_matrix(m_jacobian, ax, color=colors[0], log=log)
-    fig.colorbar(ax.pcolor(m_jacobian), ax=ax, label=cbars[0])
-    plt.title(titles[0], fontsize=fs)
-    plt.savefig(file_names[0], bbox_inches='tight')
+"""
+    # load matpotlib-generated figures
+    # loop over paths and add them to the figure
+    fig1 = sg.fromfile('outer_product_visualization.svg')
+    fig2 = sg.fromfile('output.svg')
 
-    # Visualize each component of the shift matrix
-    for index in range(len(Xs)):
-        a = Xs[index]
-        p = eigvecs[:, a] @ etas[index]
-        b = Ys[index]
-        q = eigvecs[:, b] @ nus[index]
-        S_current = np.outer(p, q)
+    # get the plot objects
+    plot1 = fig1.getroot()
+    plot2 = fig2.getroot()
+    plot2.moveto(20, 0, scale_x=0.5)
 
-        fig, ax = plt.subplots(1, 1, figsize=(7, 5.2))
-        m_S_current = ma.masked_array(S_current, mask=(np.abs(S_current) < 1e-10))
-        visualize_matrix(m_S_current, ax, color=colors[index + 1], log=log)
-        fig.colorbar(ax.pcolor(m_S_current), ax=ax, label=cbars[index + 1])
-        plt.title(titles[index + 1], fontsize=fs)
-        plt.savefig(file_names[index + 1], bbox_inches='tight')
+    # add text labels
+    txt1 = sg.TextElement(25,20, "A", size=12, weight="bold")
+    txt2 = sg.TextElement(305,20, "B", size=12, weight="bold")
 
-    # Visualize the full shift matrix
-    fig, ax = plt.subplots(1, 1, figsize=(7, 5.2))
-    m_S = ma.masked_array(S, mask=(np.abs(S) < 1e-10))
-    visualize_matrix(m_S, ax, color=colors[-1], log=log)
-    fig.colorbar(ax.pcolor(m_S), ax=ax, label="$\mathrm{log}_{10}(\mathcal{L}+S)$")
-    plt.title("$\mathcal{L}+S$", fontsize=fs)
-    plt.savefig(file_names[-1], bbox_inches='tight')
+    # append plots and labels to figure
+    fig.append([plot1, plot2])
+    fig.append([txt1, txt2])
 
+    # save generated SVG files
+    fig.save("fig_final.svg")
 
-def visualize_shift_matrixes_eigenspace_save(shift_matrix_obj: ShiftMatrix, log=True, fs=20):
-    """
-    Visualize the shift matrix and its components in the eigenbasis.
-
-    Parameters
-    ----------
-    shift_matrix_obj : ShiftMatrix
-        The ShiftMatrix object containing the shift matrix and related data.
-    log : bool, optional
-        Whether to use logarithmic scaling for the visualization. Default is True.
-    fs : int, optional
-        Font size for the plot. Default is 20.
-    """
-    if shift_matrix_obj.shift_matrix is None:
-        raise ValueError("Shift matrix has not been constructed.")
-
-    # Extract data from the ShiftMatrix object
-    S = shift_matrix_obj.shift_matrix
-    Xs = shift_matrix_obj.Xs
-    Ys = shift_matrix_obj.Ys
-    etas = shift_matrix_obj.etas
-    nus = shift_matrix_obj.nus
-    jacobian = shift_matrix_obj.jacobian
-    eigvals, eigvecs = shift_matrix_obj.eigenvalues, shift_matrix_obj.eigenvectors
-
-    # Transform shift matrix to eigenbasis
-    S_eigenbasis = eigvecs.T @ S @ eigvecs
-
-    # Visualize the shift matrix in the eigenbasis
-    fig, ax = plt.subplots(1, 1, figsize=(7, 5.2))
-    m_S_eigenbasis = ma.masked_array(S_eigenbasis, mask=(np.abs(S_eigenbasis) < 1e-10))
-    visualize_matrix(m_S_eigenbasis, ax, color=darkblue, log=log)
-    fig.colorbar(ax.pcolor(m_S_eigenbasis), ax=ax, label="$\mathrm{log}_{10}(VSV^{-1})$")
-    plt.title("$VSV^{-1}$", fontsize=fs)
-    plt.savefig("S_eigenbasis", bbox_inches='tight')
-
+    Figure("16cm", "6.5cm", 
+            Panel(
+                SVG("outer_product_visualization.svg"),
+                Text("A", 25, 20, size=12, weight='bold')
+                ).move(30,0),
+            Panel(
+                SVG("output.svg").scale(0.5),
+                Text("B", 25, 20, size=12, weight='bold')
+                ).move(20, 0),
+                Grid(20,20)
+            ).save("fig_final_compose.svg")
+            """
 
 # Example usage
 if __name__ == "__main__":
+    
     # Create a model and compute the Jacobian
-    model = sokm.from_random_sparse_graph(num_nodes=10, edge_probability=0.3, damping_coefficient=0.01)
+    model = sokm.from_random_sparse_graph(num_nodes=8, edge_probability=0.3, damping_coefficient=0.01)
     model.compute_jacobian()
     model.summary()
     vtn_nodes=np.array([1,3,5,6])
     #plot_network(model,vtn_nodes=vtn_nodes)
     #resonance_plot(model,log=True, show_resonance_location=True)
 
+    
     # Create a ShiftMatrix object
     shift_matrix_obj = ShiftMatrix(model=model)
 
     # Generate a shift matrix
-    eigenvalue_indices = [1, 2, 3, 4]
-    shifts = np.array([-0.5, 0.3,.25,0.4])
-    zero_rows = np.array([6,7,8,9])
-    zero_cols = np.array([8])
+    eigenvalue_indices = [ 4,5]
+    shifts = np.array([-0.5, 0.3])
+    zero_rows = np.array([4,5,6,7])
+    zero_cols = np.array([0])
     shift_matrix_obj.construct_from_scratch(eigenvalue_indices, shifts, zero_rows, zero_cols)
+    
 
+    #shift_matrix_obj= ShiftMatrix.load_from_file("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\Instance_2026-03-24_11-40-42\\shift_matrix.json")
     # Visualize the shift matrix
    # visualize_shift_matrixes_save(shift_matrix_obj, log=True)
     #visualize_shift_matrixes_eigenspace_save(shift_matrix_obj, log=True)
     #isualize_matrix(matrix=shift_matrix_obj.shift_matrix)
-    a=np.random.rand(10)**3
-    b=np.random.rand(10)
-    visualize_matrix(left_vec=a[None,:], right_vec=b[:, None], matrix=None, min_max=None, color=green)
-    construction_visualization(shift_matrix_obj, in_eigenspace=False, log=True, fs=20, cutoff=1e-5)
-    construction_visualization(shift_matrix_obj, in_eigenspace=True, log=True, fs=20, cutoff=1e-5)
+    #visualize_matrix(left_vec=a[None,:], right_vec=b[:, None], matrix=None, min_max=None, color=green)
+    #construction_visualization(shift_matrix_obj, in_eigenspace=False, absolute=True, log=False, fs=20, cutoff=1e-5)
+    #construction_visualization(shift_matrix_obj, in_eigenspace=True, absolute=True, log=False, fs=20, cutoff=1e-5)
+    construction_publication_ready(shift_matrix_obj, log=True, absolute=True)
     
