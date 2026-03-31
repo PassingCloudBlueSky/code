@@ -228,7 +228,7 @@ class SecondOrderKuramotoModel:
         return save_dir
 
     @classmethod
-    def load_parameters(cls, folder_path: str) -> "SecondOrderKuramotoModel":
+    def load_from_folder(cls, folder_path: str) -> "SecondOrderKuramotoModel":
         """
         Load model parameters from a folder.
 
@@ -273,7 +273,7 @@ class SecondOrderKuramotoModel:
         print(f"Jacobian computed: {self.jacobian_matrix is not None}")
 
 
-    def calculate_response_amplitudes(self, omega: np.ndarray) -> np.ndarray:
+    def calculate_response_amplitudes(self, omega: np.ndarray, k=1, S=None) -> np.ndarray:
         """
         Calculate response amplitudes for a range of frequencies.
 
@@ -283,6 +283,9 @@ class SecondOrderKuramotoModel:
             Array of frequencies.
         damping : float
             Damping coefficient.
+        k: int
+            Node of perturbation with frequency omega.
+        S: shift matrix
 
         Returns
         -------
@@ -291,16 +294,19 @@ class SecondOrderKuramotoModel:
         """
         if self.jacobian_matrix is None:
             self.compute_jacobian()
-        eigvals, eigvecs = np.linalg.eigh(self.jacobian_matrix)
+        if np.any(S==None):
+            eigvals, eigvecs = np.linalg.eigh(self.jacobian_matrix)
+        else:
+            eigvals,eigvecs=np.linalg.eig(self.jacobian_matrix+S)
         response_amplitudes = np.zeros((len(self.power_vector), len(omega)))
+        # looping over all nodes to calculate the response amplitude for each
         for i in range(len(self.power_vector)):
-            for j, w in enumerate(omega):
-                response_amplitudes[i, j] = np.abs(
-                    np.sum(eigvecs[i, :] * eigvecs[i, :] / (-w**2 + 1j * self.damping_coefficient * w - eigvals))
-                )
+            # looping over all nodes to collect all contributions to the node i's response amplitude
+            for l in range(len(self.power_vector)):
+                response_amplitudes[i,:]+=np.abs(eigvecs[l,k]*eigvecs[l,i]/(-omega**2+1j*omega*self.damping_coefficient-eigvals[l]))
         return response_amplitudes
 
-    def predict_resonance_frequencies(self) -> np.ndarray:
+    def predict_resonance_frequencies(self, S=None) -> np.ndarray:
         """
         Predict resonance frequencies based on eigenvalues and damping.
 
@@ -309,14 +315,17 @@ class SecondOrderKuramotoModel:
         damping : float
             Damping coefficient.
 
-        Returns
+        Returns 
         -------
         resonance_frequencies : np.ndarray
             Predicted resonance frequencies.
         """
         if self.jacobian_matrix is None:
             raise ValueError("Jacobian matrix not computed. Call compute_jacobian() first.")
-        eigvals = np.linalg.eigvalsh(self.jacobian_matrix)
+        if S is None:
+            eigvals = np.linalg.eigvalsh(self.jacobian_matrix)
+        else:
+            eigvals=np.linalg.eigvals(self.jacobian_matrix+S)
         return np.sqrt(np.abs(eigvals) - (self.damping_coefficient**2) / 4)
         
 
@@ -333,5 +342,5 @@ if __name__ == "__main__":
     save_path = model.save_parameters()
     print(f"Parameters saved to: {save_path}")
     model.summary()
-    model_loaded= SecondOrderKuramotoModel.load_parameters(save_path)
+    model_loaded= SecondOrderKuramotoModel.load_from_folder(save_path)
     model_loaded.summary()

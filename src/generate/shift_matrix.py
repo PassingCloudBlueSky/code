@@ -207,7 +207,7 @@ class ShiftMatrix:
 
     def calculate_coefficients_one_side(self, shifts: np.ndarray, zero_indices: np.ndarray,  right: bool = True) -> List[np.ndarray]:
         """
-        Calculate the coefficients for constructing the shift matrix.
+        Calculate the left or right coefficients for constructing the shift matrix.
 
         Parameters
         ----------
@@ -217,8 +217,6 @@ class ShiftMatrix:
             Desired shifts for the eigenvalues.
         zero_indices : np.ndarray
             Indices of rows/columns to remain zero.
-        index_sets : list[np.ndarray]
-            Index sets for constructing the shift matrix.
         right : bool
             Whether to calculate coefficients for right spanning vectors.
 
@@ -238,17 +236,25 @@ class ShiftMatrix:
         if np.shape(shifts)!=np.shape(self.eigenvalue_indices):
             raise ValueError(f"Array of shift values is of shape {np.shape(shifts)}, which does not match the provided array of supposedly corresponding eigenvalue indices {np.shape(self.eigenvalue_indices)}.")
 
+        if not isinstance(zero_indices,np.ndarray) or zero_indices.dtype!=int:
+            raise ValueError("Zero indices must be provided as a numpy array of integers.")
+
+        # miltipurposing the function for calculating right and left constructing vectors
         if right:
             index_sets=self.Ys
         else:
             index_sets=self.Xs
 
+        # looping over the eigenvalue indices of all desired eigenvalue shifts and calculating the corresponding coefficients for the construction of the shift matrix
         for i, idx in enumerate(self.eigenvalue_indices):
+                
+                # calculating the solution space for the zero rows/columns constraint
                 masked_vectors = self.eigenvectors[zero_indices][:, index_sets[i]]
                 null_space = la.null_space(masked_vectors)
                 if null_space.size == 0:
                     raise ValueError(f"Null space is empty for eigenvalue index {idx}.")
 
+                # plugging the solution space into the equation for the coefficient vectors
                 relevant_row=null_space[self.Xs[i]==idx,:] if not right else null_space[self.Ys[i]==idx,:]
                 coeff=null_space@relevant_row.T/np.sum(relevant_row**2)
                 if right:
@@ -263,27 +269,30 @@ class ShiftMatrix:
 
     def calculate_shift_matrix_generators(self, in_eigenspace=False) -> List[np.ndarray]:
         """
-        Calculate individual shift matrices corresponding to each desired eigenvalue shift.  
-        If in_eigenspace is True, the individual shift matrices are calculated in the eigenbasis of the Jacobian, 
+        Calculate individual shift generating vectors corresponding to each desired eigenvalue shift.  
+        If in_eigenspace is True, the individual generating vectors are calculated in the eigenbasis of the Jacobian, 
         otherwise they are calculated in the physical basis. 
         
         Parameters
         ----------
             in_eigenspace : bool
-                Whether to calculate the individual shift matrices in the eigenbasis of the Jacobian.
+                Whether to calculate the individual shift generating vectors in the eigenbasis of the Jacobian.
 
         Returns
         -------
             left_generators : list[np.ndarray]
-                List of left spanning vectors for the individual shift matrices in the chosen basis.
+                List of left spanning vectors for the individual shift generating vectors in the chosen basis.
             right_generators : list[np.ndarray]
-                List of right spanning vectors for the individual shift matrices in the chosen basis.
+                List of right spanning vectors for the individual shift generating vectors in the chosen basis.
         """
+
+        # checking prerequisites
         if self.etas is None or self.nus is None:
-            raise ValueError("Coefficients must be calculated before constructing individual shift matrices.")
+            raise ValueError("Coefficients must be calculated before constructing individual shift generating vectors.")
         
         left_generators= []
         right_generators= []
+
         # looping over all individual shift matrices
         for i in range(len(self.eigenvalue_indices)):
 
@@ -338,6 +347,7 @@ class ShiftMatrix:
         shift_matrix : np.ndarray
             The constructed shift matrix.
         """
+
         self.generate_index_sets(eigenvalue_indices, len(zero_rows), len(zero_cols))
         self.calculate_coefficients_one_side(shifts, zero_rows, right=False)
         self.calculate_coefficients_one_side(shifts, zero_cols, right=True)
@@ -379,7 +389,7 @@ if __name__ == "__main__":
     eigenvalue_indices = [1, 2]
     shifts = np.array([-0.5, 0.3])
     zero_rows = np.array([1,2],dtype=int)
-    zero_cols = np.array([4,5])
+    zero_cols = np.array([],dtype=int)
     #zero_rows=np.arange(10,80)
     #zero_cols=np.array([1])
     

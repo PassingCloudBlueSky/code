@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import ByteString, Optional
 from IPython.display import SVG
 from matplotlib import cm
 import matplotlib.pyplot as plt
@@ -7,6 +7,7 @@ from matplotlib.lines import Line2D
 from matplotlib import colors
 from matplotlib import rc
 from matplotlib.colors import ListedColormap, Normalize, LinearSegmentedColormap
+import matplotlib.image as mpimg
 import numpy as np
 import numpy.ma as ma
 from kuramoto_class import SecondOrderKuramotoModel as sokm 
@@ -16,6 +17,10 @@ import networkx as nx
 import os
 import svgutils.transform as sg
 import svgutils.compose as sc
+from cairosvg import svg2png
+
+
+
 # Color definitions
 blue=np.array([0,170,212,100])/256
 darkblue = np.array([0, 68, 170, 100])/256
@@ -55,72 +60,102 @@ def save_figure(fig, save_dir: str, name: str) -> str:
         #save_path=os.path.join(save_dir, date_str+name)
         save_path=os.path.join(save_dir, name)
 
-        fig.savefig(save_path,bbox_inches='tight',format="svg", dpi=300)
+        fig.savefig(save_path,bbox_inches='tight',format="svg", dpi=300, transparent=True)
         
         return save_path
 
 
-
-
-def resonance_plot(model: sokm,a=0.01,log=False, extra_scope=0.1, show_resonance_location=False, fs=15,lw=1,alpha=0.8):
+def construct_omega(model:sokm,extra_scope=0.2):
     """
-    creates a resonance plot for a network with graph Laplacian L and a perturbation at node k. 
+        Helper function to generate a frequency range for the domain of resonant behavior.
     """
-    #calculate eigenvalues and eigenvectors
-    eigvals, eigvec= scipy.linalg.eigh(model.jacobian_matrix)
-    
-    
-    # generate frequency array adapted to the frequency range with resonant behaviour
+
     resonance_frequencies=model.predict_resonance_frequencies()
-    resonance_frequencies=resonance_frequencies[np.invert(np.isnan(resonance_frequencies))] #throwing out the np.nan caused by 0 eigenvalue
+    resonance_frequencies=resonance_frequencies[np.invert(np.isnan(resonance_frequencies))] #throwing out the np.nan values caused by 0 eigenvalue
     lower_bound=np.min(resonance_frequencies)
     upper_bound=np.max(resonance_frequencies)
+
     puffer=extra_scope*(upper_bound-lower_bound)
     lower_bound-=puffer
     upper_bound+=puffer
-    omega=np.linspace(lower_bound,upper_bound,num=1000) #frequency values over which we plot
+    return np.linspace(lower_bound,upper_bound,num=1000) #frequency values over which we plot
 
 
-    response_vals=model.calculate_response_amplitudes(omega)
+
+def resonance_plot(model: sokm,
+                   S=None,
+                   name="resonance_plot.svg",
+                   omega=None, pert_band=None,
+                   min_max=None,
+                   log=False,
+                   extra_scope=0.2,
+                   show_resonance_location=False,
+                   fs=6,
+                   lw=1,
+                   alpha=0.8,
+                   x_axis_off=False,
+                   perturbed_node=6):
+    """
+    Creates a resonance plot for a network with graph Laplacian L and a perturbation at node k. 
+    """    
+    
+    # generate frequency array omega in the area of resonant behavior unless provided as parameter
+    if omega==None:
+        omega=construct_omega(model,extra_scope=extra_scope)
+
+
+    response_vals=model.calculate_response_amplitudes(omega,S=S,k=perturbed_node)
     
 
-    #loop over all nodes, calculate their frequency dependent response and plot them into one graph
-    fig,ax=plt.subplots(1, 1,figsize=(14,4.6))
-    for i in range(len(eigvals)): #loop over all nodes
+    # loop over all nodes, and plot their freuquency dependent response amplitudes into one graph
+    fig,ax=plt.subplots(1, 1,figsize=(2.1, 0.7))
+    for i in range(len(response_vals[:,0])): #loop over all nodes
         plt.plot(omega,response_vals[i,:],alpha=alpha,color="royalblue",linewidth=lw)
         
     # dashed lines for analytic resonance location
     if show_resonance_location:
+        resonance_frequencies=model.predict_resonance_frequencies(S=S)
         for i in range(len(resonance_frequencies)):
             plt.axvline(x=resonance_frequencies[i],linestyle="dashed",color="grey",alpha=0.5,linewidth=1.)
 
-    """
+    
     # Drawing perturbation band if provided
-    if np.any(box!=0): 
-        eigvals=np.flip(eigvals)
-        box=pred_resonance(eigvals[box],a)
-        #print(box)
-        print("box width: ",box[1]-box[0])
-        ax.add_patch(Rectangle((0.99*box[1],0), 0.8*(box[0]-box[1]), 10*np.max(np.vstack((response_vals,response_vals_hat))),color="gold",alpha=0.5,label="perturbation band"))
-    """
+    if pert_band!=None: 
+        rect=plt.Rectangle((pert_band[0],0), pert_band[1], 20*np.max(response_vals), color="gold",alpha=0.5)
+        ax.add_patch(rect)
+
+    
 
     # log or not log that is the question
     if log: 
-        plt.xscale("log")
+        #plt.xscale("log")
         plt.yscale("log")
         ax.set_ylim(bottom=0.8*np.min(response_vals))
-        plt.ylabel("$\log(A_n)$",fontsize=fs)
+        plt.ylabel("$A_n$",fontsize=fs)
     else:
         ax.set_ylim(bottom=0)
         plt.ylabel("$A_n$",fontsize=fs)
+    
+    if x_axis_off:
+        plt.tick_params(
+            axis='x',          # changes apply to the x-axis
+            which='both',      # both major and minor ticks are affected
+            bottom=False,      # ticks along the bottom edge are off
+            top=False,         # ticks along the top edge are off
+            labelbottom=False) # labels along the bottom edge are off
+    else:
+        plt.xlabel("$\omega$",fontsize=fs)
+
 
     # aesthetics
     plt.xlim((omega[0],omega[-1]))
-    plt.xticks(fontsize=fs)
-    plt.yticks(fontsize=fs)
+    if min_max!=None:
+        plt.ylim(min_max)
+    ax.tick_params(axis='x', labelsize=fs)
+    ax.tick_params(axis='y', labelsize=fs)
     for axis in ['top','bottom','left','right']: #thicker axis
-        ax.spines[axis].set_linewidth(1.2)
-    plt.xlabel("$\omega$",fontsize=fs)
+        ax.spines[axis].set_linewidth(0.6)
+    ax.set_facecolor("white")
 
     # ascertaining existence of model instance directory
     if model.current_dir == None:
@@ -128,8 +163,9 @@ def resonance_plot(model: sokm,a=0.01,log=False, extra_scope=0.1, show_resonance
 
 
     save_dir = os.path.join(model.current_dir, "plots")
-    save_figure(fig, save_dir, name="resonance_plot.svg")
-    plt.show()
+    save_path=save_figure(fig, save_dir, name=name)
+    #plt.show()
+    return save_path
 
 
     
@@ -140,7 +176,9 @@ def plot_network(
     edge_weight_key="weight",
     vtn_node_color="orange",
     vtn_edge_style="dashed",
-    save_path=None,
+    name="network.svg", 
+    fs=6,
+    perturbed_node=None
 ):
     """
     Plot a network with edge weights represented as thickness and an optional VTN visualization.
@@ -181,11 +219,11 @@ def plot_network(
 
     # Normalize edge weights for visual representation
     max_weight = max(edge_weights) if edge_weights else 1.0
-    edge_widths = [8 * (w / max_weight) for w in edge_weights]  # Scale edge thickness
+    edge_widths = [2 * (w / max_weight) for w in edge_weights]  # Scale edge thickness
     #edge_opacities = [0.2 + 0.8 * (w / max_weight) for w in edge_weights]  # Scale opacity
 
     # Create the figure and axis
-    fig, ax = plt.subplots(figsize=(7, 7))
+    fig, ax = plt.subplots(figsize=(2, 1.6))
 
     # Draw the base graph
     nx.draw(
@@ -193,14 +231,36 @@ def plot_network(
         pos,
         ax=ax,
         with_labels=False,
-        node_size=800,
+        node_size=100,
         node_color="skyblue",
-        font_size=10,
+        font_size=fs,
         font_color="black",
-        edge_color="gray",
+        edge_color="black",
         width=edge_widths,
         alpha=1.,  # Base opacity for edges
     )
+
+    # Annotate nodes with their numbers
+    nx.draw_networkx_labels(
+        G,
+        pos,
+        labels={node: str(node+1) for node in G.nodes()},  # Label each node with its number
+        font_size=fs,
+        font_color="black",
+        ax=ax,
+    )
+
+    # highlighting the perturbing node
+    if perturbed_node is not None:
+            nx.draw_networkx_nodes(
+                G,
+                pos,
+                nodelist=[perturbed_node],
+                edgecolors="grey",
+                node_size=100,
+                ax=ax,
+                node_color="none",
+            )
 
     # Highlight specific nodes if provided
     if np.any(vtn_nodes!=None):
@@ -210,9 +270,10 @@ def plot_network(
             pos,
             nodelist=vtn_nodes,
             node_color=vtn_node_color,
-            node_size=800,
+            node_size=100,
             ax=ax,
         )
+
 
         # Fully connect the highlighted nodes with dashed edges
         for i, node1 in enumerate(vtn_nodes):
@@ -231,18 +292,122 @@ def plot_network(
         model.save_parameters()
     
     save_dir = os.path.join(model.current_dir, "plots")
-    save_figure(fig, save_dir, name="network.svg")
+    save_path=save_figure(fig, save_dir, name=name)
 
     # Show the plot
-    plt.show()
+    #plt.show()
 
-    return fig, ax
+    return save_path
+
+
+def perturbation_band_from_shift_indices(model:sokm, shift_matrix_obj:ShiftMatrix, buffer=0.05):
+    """
+    Reverse engineers the left edge and width of a perturbation band that justifies shifting the eigenvalues with shift_matrix_obj.
+
+    Parameters
+    -------
+    model: sokm
+        Second Order Kuramoto Model instance from which the resonant frequencies are collected.
+    shift_matrix_obj: ShiftMatrix
+        ShiftMatrix instance in which a shift applied to model is stored. 
+    buffer:
+        Closest distance between perturbation band edges and the predicted resonance frequencies inside the perturbation band. 
+
+    Returns
+    ----------
+    
+    Touple of the left edge value of the perturbation band and the perturbation band's width
+    """
+
+
+    # fetch shift indices and determine edge indices
+    shift_indices=shift_matrix_obj.eigenvalue_indices
+    min = np.min(shift_indices)
+    max= np.max(shift_indices)
+
+    # fetch corresponding predicted resonance frequencies to calculate left edge of perturbation band its width. Extend with buffer on both sides 
+    resonance_frequencies=model.predict_resonance_frequencies()
+    left_edge= resonance_frequencies[max] - buffer
+    width = resonance_frequencies[min]-left_edge + buffer
+    
+    return left_edge,width
+
+
+
+def plot_shift_comparison(model:sokm, shift_matrix_obj:ShiftMatrix, log=True, threshhold=1e-10,fs=5,perturbed_node=6):
+
+
+    
+    paths=[]
+    
+    # calculate perturbation band rectangle left and right x values 
+    pert_band = perturbation_band_from_shift_indices(model, shift_matrix_obj)
+    
+    # construct omega array
+    omega=construct_omega(model)
+
+    # calculate y min and max values 
+    response_vals_unshifted=model.calculate_response_amplitudes(omega)
+    response_vals_shifted=model.calculate_response_amplitudes(omega,S=shift_matrix_obj.shift_matrix)
+    all_response_vals=np.vstack((response_vals_shifted,response_vals_unshifted))
+    min_max=(np.min(all_response_vals)*1.1,1.1*np.max(all_response_vals))
+
+    # fetch unshifted resonance plot data & plot
+    paths.append(resonance_plot(model, pert_band=pert_band, min_max=min_max, name="res.SVG", log=log, extra_scope=0.2, show_resonance_location=True, fs=fs,lw=1,alpha=1.,x_axis_off=True,perturbed_node=perturbed_node))
+    # generate shifted resonance data and plot
+    paths.append(resonance_plot(model, S=shift_matrix_obj.shift_matrix, pert_band=pert_band, min_max=min_max, name= "res_shifted.SVG",log=log, extra_scope=0.2, show_resonance_location=True, fs=fs,lw=1,alpha=1.,perturbed_node=perturbed_node))
+
+    # generate network plot WITH seed
+    paths.append(plot_network( model, seed=4, name="network.SVG", edge_weight_key="weight",perturbed_node=perturbed_node))
+
+    # generate network plot with VTN connecting nodes corresponding to non zero rows of the shift matrix
+    non_zero_row_indices = np.nonzero(np.any(shift_matrix_obj.shift_matrix > threshhold, axis=1))[0]
+    paths.append(plot_network( model, vtn_nodes = non_zero_row_indices, seed=4, name="network_VTN.SVG", edge_weight_key="weight", vtn_node_color="orange", vtn_edge_style="dashed",perturbed_node=perturbed_node ))
+    
+    return paths
+
+
+def compose_shift_comparison(model:sokm, shift_matrix_obj:ShiftMatrix, log=True, vtn_treshhold=1e-10, fontsize=5):
+
+    paths=plot_shift_comparison(model, shift_matrix_obj, log=log, threshhold=vtn_treshhold,fs=fontsize)
+
+    fig = sg.SVGFigure("7in", "2.2in")
+    #fig.append(sc.Grid(10,10)) # visual grid for ease of aligning figures
+
+    # vertically stacking response amplitude plots
+    x_0=110
+    y_0=45
+    for i in range(2):
+        fig_part = sg.fromfile(paths[i])
+        res_plot = fig_part.getroot()
+        res_plot.moveto(x_0, y_0*i, scale_x=1, scale_y=1)
+        reference=sg.TextElement(x_0+5,i*y_0+5, chr(ord('`')+i+2)+")", size=6)
+        fig.append([res_plot,reference])
+
+    # load and place the network plots to the left and right respectively
+    for i in range(2,4):
+        fig_part = sg.fromfile(paths[i])
+        network_plot = fig_part.getroot()
+        network_plot.moveto((i-2)*260, 0, scale_x=1, scale_y=1)
+        if i==2:
+            reference=sg.TextElement((i-2)*260+5,5, "a)", size=6)
+        else:
+            reference=sg.TextElement((i-2)*260+5,5, "d)", size=6)
+        fig.append([network_plot,reference])
+
+        
+
+    save_dir=os.path.join(shift_matrix_obj.current_dir,"plots\\comparison.svg")
+    fig.save(save_dir)
+    png_path=os.path.join(shift_matrix_obj.current_dir,"plots\\comparison.png")
+    svg2png(url=save_dir,write_to=png_path,
+            parent_height=110,parent_width=400,output_height=115*4,output_width=400*4)
 
 
 
 def add_pcolormesh(ax, matrix, color=blue, min_max=None, log=True, cutoff=1e-5, alpha=0.7, absolute=False):
     """
-    Helper function to add a pcolormesh to an axis for consistent styling across higher level functions.
+    Helper function to add a pcolormesh to an axis for consistent styling across all higher level functions.
     """
 
     if log or absolute:
@@ -320,15 +485,17 @@ def visualize_matrix(left_vec=None,
         min_max = (min_val, max_val)
     
 
-    # Plotting
+    # generating figure to plot into if no axes for layering onto has been provided
     if axs is None:
         fig, axes = plt.subplots(2,2, width_ratios=(1, dim), height_ratios=( 1,dim), figsize=((dim+2)/10, (dim+2)/10), gridspec_kw=dict(hspace=1/dim, wspace=1/dim))
     else:
         axes=axs
 
-    
+    # add matrix plot
     im=add_pcolormesh(axes[1,1], matrix, color=color, min_max=min_max, log=log, absolute=absolute, cutoff=cutoff)
     axes[1,1].set_xlabel(label[2] if len(label)==3 else label,fontsize=fs)
+
+    # add generating vextor plots if they have been provided as parameters
     if left_vec is not None and right_vec is not None:
         # Reshaping vectors to ensure they are 2D and oriented correctly for the plot
         right_vec=right_vec[None,:] if right_vec.ndim==1 else right_vec
@@ -336,12 +503,15 @@ def visualize_matrix(left_vec=None,
         right_vec=right_vec.T if right_vec.shape[0]>right_vec.shape[1] else right_vec
         left_vec=left_vec.T if left_vec.shape[0]<left_vec.shape[1] else left_vec
 
+        # plotting the vectors
         add_pcolormesh(axes[0,1], right_vec, color=color, min_max=min_max, log=log, absolute=absolute, cutoff=cutoff)
         add_pcolormesh(axes[1,0], left_vec, color=color, min_max=min_max, log=log, absolute=absolute, cutoff=cutoff)
 
+        #labels 
         axes[0,1].set_title(label[1],fontsize=fs)
         axes[1,0].set_ylabel(label[0],fontsize=fs)
     else:
+        # empty labels for plots without vectors to keep constistent plot sizes. Eases SVG composing in later stage
         axes[0,1].axis('off')
         axes[0,1].set_title(" ",fontsize=fs)
         axes[1,0].axis('off')
@@ -364,16 +534,32 @@ def visualize_matrix(left_vec=None,
 
 def construction_visualization(shift_matrix_obj:ShiftMatrix, in_eigenspace=False, log=True, absolute=False, fs=8, cutoff=1e-4):
     """
-    Visualize the construction of the shift matrix by plotting the Jacobian, the individual shift components, and the final shift matrix.
+    Helper function to visualize the construction of the shift matrix by plotting the Jacobian, 
+    the individual shift components, and everything layered on top of each other as individual SVGs.
 
     Parameters
     ----------
-    shift_matrix : ShiftMatrix
-        The ShiftMatrix object containing the shift matrix and related data.
+    shift_matrix_obj: ShiftMatrix
+        The ShiftMatrix object containing the data from which to construct the SVGs.
+    in_eigenspace: boolean, optional
+        Whether to visualize the construction in the eigenspace of the Jacobian or the physical space.
+    log: boolean, optional
+        Plotting on log scale the absolute values or not. 
+    absolute: boolean, optional
+        Plotting absolute values on regular scale.
+    cutoff=minimal value to plot. particularly relevant for log-scale plots. 
     fs : int, optional
         Font size for the plot. Default is 20.
+
+    Returns
+    ---------
+    saving_paths: list of strings
+        List containing the paths to all generated SVG figures. Order is Jacobian, individual shift figures, layered plot
+
+
     """
 
+    # checking prerequisites
     if shift_matrix_obj.shift_matrix is None:
         raise ValueError("Shift matrix has to be constructed beforehand to be visualized.")
 
@@ -408,6 +594,7 @@ def construction_visualization(shift_matrix_obj:ShiftMatrix, in_eigenspace=False
     axes_layered[0,1].axis('off')
     axes_layered[1,0].axis('off')
     axes_layered[0,0].axis('off')
+    axes_layered[1,1].set_xlabel(r"$J+\sum_{i}S_i$", fontsize=fs)
 
     # create empty list of saving_paths
     saving_paths=[]
@@ -417,51 +604,101 @@ def construction_visualization(shift_matrix_obj:ShiftMatrix, in_eigenspace=False
     saving_paths.append(visualize_matrix(matrix=jacobian, label="J", color=darkblue, log=log, absolute=absolute, fs=fs, cutoff=cutoff, name=f"{"eigenspace" if in_eigenspace else "physical"}_jacobian.svg", save_dir=save_dir, min_max=min_max) )
     
 
-    # Visualize individual shift matrices in eigen and physical space
+    # create colormap to pick individual shift matrix maximum colors from. Individual shift matrix color will the be from 0=white to this color=maximum value
     color_range=[purple, red, orange]
     individual_shift_colors_cmap = LinearSegmentedColormap.from_list("shift_cmap", color_range, N=256)
 
+    # looping over individual shift matrices to visualize their construction one by one
     n_individual_shift_matrices=len(individual_shift_matrices)
     for index in range(n_individual_shift_matrices):
         print(f"Visualizing shift component {index+1} in {'eigen' if in_eigenspace else 'physical'} space...")
+        
+        # picking max color for the white to color cmap
         color=individual_shift_colors_cmap (index / (n_individual_shift_matrices - 1))
 
+        # generating labels for subfigures
         p="p"
         q="q"
         labels = [rf"$\vec{{{p}}}_{{{index+1}}}$", rf"$\vec{{{q}}}_{{{index+1}}}^T$", f"$S_{index+1}\\coloneq\\vec{{{p}}}_{{{index+1}}}\\vec{{{q}}}_{{{index+1}}}^T$"]
 
         add_pcolormesh(axes_layered[1,1], individual_shift_matrices[index], color=color, log=log, absolute=absolute, cutoff=cutoff, min_max=min_max)
         saving_paths.append(visualize_matrix(left_vec=left_generators[index], right_vec=right_generators[index],label=labels, color=color, log=log, fs=fs, cutoff=cutoff, name=f"{"eigenspace" if in_eigenspace else "physical"}_shift_component_{index+1}.svg", save_dir=save_dir, min_max=min_max))
-    
-    axes_layered[1,1].set_xlabel(r"$J+\sum_{i}S_i$", fontsize=fs)
+
+    # add row numbers to layered plot
+    if in_eigenspace is False:
+        """
+        for i in range(dim):
+            if i%2:
+                    labels.append(f"{dim-i}")
+            else:
+                labels.append("")
+        """
+        labels=dim-np.arange(dim)
+        axes_layered[1,1].set_yticks(np.arange(dim)+0.5,labels)
+
+
     # save layered figure
     saving_paths.append(save_figure(fig_layered, save_dir=save_dir, name=f"{"eigenspace" if in_eigenspace else "physical"}_layered.svg"))
     plt.close(fig_layered)
+
     return saving_paths
 
 
 def construction_publication_ready(shift_matrix_obj:ShiftMatrix, log=True, absolute=True,fs=8):
     
+    """
+    
+    """
 
+
+    # generate the subfigures based on the properties of shift_matrix_obj
     file_paths_physical=construction_visualization(shift_matrix_obj, in_eigenspace=False, log=log, absolute=absolute, fs=fs, cutoff=1e-4)
     file_paths_eigenspace=construction_visualization(shift_matrix_obj, in_eigenspace=True, log=log, absolute=absolute, fs=fs, cutoff=1e-4)
     
     #create new SVG figure
     fig = sg.SVGFigure("17cm", "6.5cm")
-    #fig.append(sc.Grid(10,10))
+    #fig.append(sc.Grid(10,10)) # visual grid for ease of aligning figures
 
     # loop to load and add all the generated SVGs to the figure, with appropriate positioning and scaling
-    symbols=[]
-    def add_svg_to_figure(fig,file_paths, second_row=False):
+    def add_svg_row_to_figure(fig,file_paths, second_row=False):
+        """
+        Helper function to line up the construction process of a shifted jacobian either in the eigenspace (second_row=False) or physical space (True).
         
+        Parameters
+        --------
+        fig: svgutils Figure
+            Object onto which the svg files are appended.
+        file_paths: list of strings
+            List of the paths to the svg files of the construction process. Starting with the jacobian, the individual shift matrices and ending with the layered figure.
+        second_row: boolean
+            Indicates current row of cunstruction.
+            False: eigenspace
+            True: physical space
+
+        Returns
+        --------
+        save_dir: string
+            Path to the finishes SVG file.
+        
+        """
+
+        # vertical offset of row
         y_0 = 64 if second_row else 10
+
+        # list to store "+"/"=" sign figures such that they can be appended to fi in the end and are layered on top of the other svgs, are not covered by them
+        symbols=[]
+
+        #looping over the individual SVGs
         for i,path in enumerate(file_paths):
-            fig_part = sg.fromfile(path)
-            plot = fig_part.getroot()
+
+            # horizontal offset of objects to append
             x_0 = i*70
             if i==0:
                 x_0 += 10
-            
+
+            # appending and positioning the svg figure of the current loop
+            fig_part = sg.fromfile(path)
+            plot = fig_part.getroot()
             plot.moveto(x_0, y_0, scale_x=0.6, scale_y=0.6)
             fig.append([plot])
 
@@ -470,71 +707,49 @@ def construction_publication_ready(shift_matrix_obj:ShiftMatrix, log=True, absol
                 x_0 -= 10
             elif i==0:
                 x_0 -=8
+
+            # generating and appending referencing label of the subfigure
             reference_offset=len(file_paths)+1 if second_row else 1
             reference=sg.TextElement(x_0+10,y_0+15, chr(ord('`')+i+reference_offset)+")", size=6)
+
+            # generating and appending +/= signs to illustrate the narrative between the figures
             if i<len(file_paths)-2:
                 plus=sg.TextElement(x_0+65,y_0+32,"+",size=6)
                 symbols.append(plus)
-                #fig.append([plus])
             elif i==len(file_paths)-2:
                 equal=sg.TextElement(x_0+65,y_0+32,"=",size=6)
                 symbols.append(equal)
-                #fig.append([equal])
             fig.append([reference])
         
+        # space label
         space=sg.TextElement(10,y_0+50, "Physical space" if second_row else "Eigenspace", size=6)
         space.rotate(270, 10, y_0+50)
         fig.append([space])
+
+        # append +/= symbols on top of everything else
         fig.append(symbols)
     
-    add_svg_to_figure(fig, file_paths_eigenspace, second_row=False)
-    add_svg_to_figure(fig, file_paths_physical, second_row=True)
+    add_svg_row_to_figure(fig, file_paths_eigenspace, second_row=False)
+    add_svg_row_to_figure(fig, file_paths_physical, second_row=True)
 
+    # dividing line between the spaces
     line=sc.Line([(5,66),(45+70*(len(file_paths_physical)-1),66)],width=0.8)
     fig.append([line])
 
     save_dir=os.path.join(shift_matrix_obj.current_dir,"plots\\combined.svg")
     fig.save(save_dir)
+    png_path=os.path.join(shift_matrix_obj.current_dir,"plots\\combined.png")
+    svg2png(url=save_dir,write_to=png_path,
+            parent_height=150,parent_width=70*len(file_paths_eigenspace),output_height=1500,output_width=700*len(file_paths_eigenspace))
     return save_dir
 
-"""
-    # load matpotlib-generated figures
-    # loop over paths and add them to the figure
-    fig1 = sg.fromfile('outer_product_visualization.svg')
-    fig2 = sg.fromfile('output.svg')
 
-    # get the plot objects
-    plot1 = fig1.getroot()
-    plot2 = fig2.getroot()
-    plot2.moveto(20, 0, scale_x=0.5)
 
-    # add text labels
-    txt1 = sg.TextElement(25,20, "A", size=12, weight="bold")
-    txt2 = sg.TextElement(305,20, "B", size=12, weight="bold")
-
-    # append plots and labels to figure
-    fig.append([plot1, plot2])
-    fig.append([txt1, txt2])
-
-    # save generated SVG files
-    fig.save("fig_final.svg")
-
-    Figure("16cm", "6.5cm", 
-            Panel(
-                SVG("outer_product_visualization.svg"),
-                Text("A", 25, 20, size=12, weight='bold')
-                ).move(30,0),
-            Panel(
-                SVG("output.svg").scale(0.5),
-                Text("B", 25, 20, size=12, weight='bold')
-                ).move(20, 0),
-                Grid(20,20)
-            ).save("fig_final_compose.svg")
-            """
 
 # Example usage
 if __name__ == "__main__":
     
+    """
     # Create a model and compute the Jacobian
     model = sokm.from_random_sparse_graph(num_nodes=8, edge_probability=0.3, damping_coefficient=0.01)
     model.compute_jacobian()
@@ -551,17 +766,18 @@ if __name__ == "__main__":
     eigenvalue_indices = [ 4,5]
     shifts = np.array([-0.5, 0.3])
     zero_rows = np.array([4,5,6,7])
-    zero_cols = np.array([0])
+    zero_cols = np.array([0],dtype=int)
     shift_matrix_obj.construct_from_scratch(eigenvalue_indices, shifts, zero_rows, zero_cols)
-    
 
-    #shift_matrix_obj= ShiftMatrix.load_from_file("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\Instance_2026-03-24_11-40-42\\shift_matrix.json")
-    # Visualize the shift matrix
-   # visualize_shift_matrixes_save(shift_matrix_obj, log=True)
-    #visualize_shift_matrixes_eigenspace_save(shift_matrix_obj, log=True)
-    #isualize_matrix(matrix=shift_matrix_obj.shift_matrix)
-    #visualize_matrix(left_vec=a[None,:], right_vec=b[:, None], matrix=None, min_max=None, color=green)
-    #construction_visualization(shift_matrix_obj, in_eigenspace=False, absolute=True, log=False, fs=20, cutoff=1e-5)
-    #construction_visualization(shift_matrix_obj, in_eigenspace=True, absolute=True, log=False, fs=20, cutoff=1e-5)
-    construction_publication_ready(shift_matrix_obj, log=True, absolute=True)
+    pert_band=[1.1,1.4]
+    #resonance_plot(model,log=True, show_resonance_location=True)
+    #plot_shift_comparison(model, shift_matrix_obj)
+    """
+
+    model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\Instance_2026-03-31_10-32-17")
+    
+    shift_matrix_obj= ShiftMatrix.load_from_file("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\Instance_2026-03-31_10-32-17\\shift_matrix.json")
+    compose_shift_comparison(model, shift_matrix_obj)
+
+    #construction_publication_ready(shift_matrix_obj, log=True, absolute=True)
     
