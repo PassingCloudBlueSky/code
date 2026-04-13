@@ -292,21 +292,26 @@ class SecondOrderKuramotoModel:
         response_amplitudes : np.ndarray
             Response amplitudes for each node.
         """
+        
+        # making sure there is a jacobian
         if self.jacobian_matrix is None:
             self.compute_jacobian()
+
+        # shifted and unshifted
         if np.any(S==None):
             eigvals, eigvecs = np.linalg.eigh(self.jacobian_matrix)
         else:
             eigvals,eigvecs=np.linalg.eig(self.jacobian_matrix+S)
-        response_amplitudes = np.zeros((len(self.power_vector), len(omega)))
+
+        response_amplitudes = np.zeros((len(eigvals), len(omega)))
         # looping over all nodes to calculate the response amplitude for each
-        for i in range(len(self.power_vector)):
+        for i in range(len(eigvals)):
             # looping over all nodes to collect all contributions to the node i's response amplitude
-            for l in range(len(self.power_vector)):
+            for l in range(len(eigvals)):
                 response_amplitudes[i,:]+=np.abs(eigvecs[l,k]*eigvecs[l,i]/(-omega**2+1j*omega*self.damping_coefficient-eigvals[l]))
         return response_amplitudes
 
-    def predict_resonance_frequencies(self, S=None) -> np.ndarray:
+    def predict_resonance_frequencies(self, S=None, shifted_eigvals=None) -> np.ndarray:
         """
         Predict resonance frequencies based on eigenvalues and damping.
 
@@ -322,10 +327,15 @@ class SecondOrderKuramotoModel:
         """
         if self.jacobian_matrix is None:
             raise ValueError("Jacobian matrix not computed. Call compute_jacobian() first.")
-        if S is None:
-            eigvals = np.linalg.eigvalsh(self.jacobian_matrix)
-        else:
+        
+        # shifted and unshifted
+        if S is not None:
             eigvals=np.linalg.eigvals(self.jacobian_matrix+S)
+        elif shifted_eigvals is not None:
+            eigvals=shifted_eigvals
+        else:
+            eigvals = np.linalg.eigvalsh(self.jacobian_matrix)
+
         return np.sqrt(np.abs(eigvals) - (self.damping_coefficient**2) / 4)
         
 

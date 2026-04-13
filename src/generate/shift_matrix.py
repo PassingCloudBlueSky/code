@@ -225,7 +225,7 @@ class ShiftMatrix:
         coefficients : list[np.ndarray]
             Coefficients for constructing the shift matrix.
         """
-
+        self.shifts=shifts
         system_dim = self.jacobian.shape[0]
         coefficients = []
 
@@ -312,6 +312,10 @@ class ShiftMatrix:
         
         return left_generators, right_generators
 
+    def cunstruct_individual_shift_matrices(self, in_eigenspace=False):
+        left_generators, right_generators = self.calculate_shift_matrix_generators(in_eigenspace=in_eigenspace)
+        individual_shift_matrices= [np.outer(p_i, q_i) for p_i, q_i in zip(left_generators, right_generators)] 
+        return individual_shift_matrices
 
     def construct_shift_matrix(self) -> np.ndarray:
         """
