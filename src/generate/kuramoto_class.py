@@ -7,9 +7,9 @@ import random
 import scipy.optimize as so
 from typing import Optional, Tuple, Any
 import sys
+from base_model import BaseModel
 
-
-class SecondOrderKuramotoModel:
+class SecondOrderKuramotoModel(BaseModel):
     """
     Second-order Kuramoto model for power grid applications.
 
@@ -45,12 +45,11 @@ class SecondOrderKuramotoModel:
         damping_coefficient : float
             Damping coefficient for the system.
         """
+        super().__init__()
         self.connectivity_matrix = np.array(connectivity_matrix, dtype=float)
         self.power_vector = np.array(power_vector, dtype=float)
         self.damping_coefficient = float(damping_coefficient)
-        self.fixed_point: Optional[np.ndarray] = None
-        self.jacobian_matrix: Optional[np.ndarray] = None
-        self.current_dir: Optional[str] = None
+        
 
     @classmethod
     def from_random_sparse_graph(
@@ -285,7 +284,8 @@ class SecondOrderKuramotoModel:
             Damping coefficient.
         k: int
             Node of perturbation with frequency omega.
-        S: shift matrix
+        S: np.ndarray, optional
+            If provided, response amplitudes are calculated based on the shifted Jacobian J+S.
 
         Returns
         -------
@@ -319,6 +319,8 @@ class SecondOrderKuramotoModel:
         ----------
         damping : float
             Damping coefficient.
+        S : np.ndarray, optional
+            If provided, resonance frequencies are predicted based on the shifted Jacobian J+S.
 
         Returns 
         -------
@@ -337,9 +339,39 @@ class SecondOrderKuramotoModel:
             eigvals = np.linalg.eigvalsh(self.jacobian_matrix)
 
         return np.sqrt(np.abs(eigvals) - (self.damping_coefficient**2) / 4)
+    
         
+    def kuramoto_ode(self, t: float, y: np.ndarray,args) -> np.ndarray:
+        """
+        Compute the time derivative of the state vector y at time t based on the second-order Kuramoto model.
 
-# missing: partial loading
+        Parameters
+        ----------
+        t : float
+            Current time.
+        y : np.ndarray
+            Current state vector (concatenation of phase angles and their derivatives).
+
+        Returns
+        -------
+        np.ndarray
+            Time derivative of the state vector.
+        """
+        n = len(self.connectivity_matrix)
+        if len(y) is not 2*n:
+            raise ValueError(f"Dimension of state vector is {len(y)} which does not match system dymension {2*n}.")
+
+
+        theta = y[:n]
+        dtheta_dt = y[n:]
+
+        # Compute the second derivative of theta using the Kuramoto model equations
+        d2theta_dt2 = self.power_vector - self.damping_coefficient * dtheta_dt + np.sum(
+            self.connectivity_matrix * np.sin(theta[None,:] - theta[:,None]), axis=1) #check axis/broadcasting here
+
+        return np.concatenate((dtheta_dt, d2theta_dt2))
+
+
 
 # Example usage
 if __name__ == "__main__":

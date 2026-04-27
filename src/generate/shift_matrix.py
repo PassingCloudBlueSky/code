@@ -6,6 +6,7 @@ from param import String
 import scipy.linalg as la
 from typing import List, Tuple, Optional
 from kuramoto_class import SecondOrderKuramotoModel as sokm 
+from base_model import BaseModel
 
 
 
@@ -15,14 +16,14 @@ class ShiftMatrix:
     of a system's Jacobian.
     """
 
-    def __init__(self, model=None, jacobian: Optional[np.ndarray] = None, current_dir: Optional[str] = None):
+    def __init__(self, model: Optional[BaseModel]=None, jacobian: Optional[np.ndarray] = None, current_dir: Optional[str] = None):
         """
         Initialize the ShiftMatrix class.
 
         Parameters
         ----------
         jacobian : np.ndarray
-            The Jacobian matrix (curly_L) of the system.
+            The Jacobian matrix of the system for which the shift is constructed.
         """
         if model is not None:
             if model.jacobian_matrix is None:
@@ -34,6 +35,8 @@ class ShiftMatrix:
         elif jacobian is not None and current_dir is not None:
             self.jacobian = jacobian
             self.current_dir = current_dir
+        else:
+            raise ValueError("Either a model with a computed Jacobian or both a Jacobian and current directory must be provided.")
 
 
         self.eigenvalues, self.eigenvectors = la.eigh(self.jacobian)
@@ -55,8 +58,9 @@ class ShiftMatrix:
 
         Parameters
         ----------
-        filename : str
-            The name of the file to save the data to.
+        path : str
+            The name of the file to save the data to. If left empty (default), 
+            the file will be saved in the current directory with the name "shift_matrix.json".
         """
         # Prepare data for serialization
         def to_serializable(obj):
@@ -158,16 +162,33 @@ class ShiftMatrix:
 
     def generate_index_sets(self, eigenvalue_indices: List[int], num_zero_rows: int, num_zero_cols: int) -> Tuple[List[np.ndarray], List[np.ndarray]]:
         """
-        system_dim = size of the system
-        eigenvalue_indices = indices of the eigenvalues that we want to shift
-        num_zero_rows = number of zero rows desired
-        num_zero_cols = number of zero columns desired
+        Generate index sets X and Y for constructing the shift matrix.
         
+        This method creates index sets Xs and Ys for each eigenvalue to be shifted, omitting 
+        index 0 (which corresponds to the unity eigenvector and ascertains phase invariance and non-driving 
+        in the case of the second order Kuramoto model). Excess degrees of freedom not 
+        required for zero row/column constraints are distributed evenly between Xs and Ys.
+
+        Parameters
+        ----------
+        eigenvalue_indices : list[int]
+            Indices of the eigenvalues to be shifted.
+        num_zero_rows : int
+            Number of rows that should remain zero in the shift matrix.
+        num_zero_cols : int
+            Number of columns that should remain zero in the shift matrix.
+
+        Returns
+        -------
+        Xs : list[np.ndarray]
+            Index sets for left spanning vectors, one set for each eigenvalue index.
+        Ys : list[np.ndarray]
+            Index sets for right spanning vectors, one set for each eigenvalue index.
         
-        generates for a given set of eigenvalues to shift and the number of zero rows and columns 
-        desired index sets Xs={X_k|for all k in eigenvalue_indices} and Ys:={Y_k|for all k in eigenvalue_indices}, 
-        omitting the index 0 which corresponds to the unity eigenvector. Excess degrees of freedom not
-        needed for the realization of constraints are distributed evenly betwen the Xs and Ys.
+        Raises
+        ------
+        ValueError
+            If the system dimension is too small to accommodate the specified constraints.
         """
 
         self.eigenvalue_indices=np.array(eigenvalue_indices)
@@ -207,7 +228,8 @@ class ShiftMatrix:
 
     def calculate_coefficients_one_side(self, shifts: np.ndarray, zero_indices: np.ndarray,  right: bool = True) -> List[np.ndarray]:
         """
-        Calculate the left or right coefficients for constructing the shift matrix.
+        Calculate the left or right coefficients for the linear combination of the left or right generating vector from the Jacobian eigenvectors,
+         which are then later used for constructing of the shift matrix as the sum of their outer products.
 
         Parameters
         ----------
@@ -216,7 +238,8 @@ class ShiftMatrix:
         shifts : np.ndarray
             Desired shifts for the eigenvalues.
         zero_indices : np.ndarray
-            Indices of rows/columns to remain zero.
+            Indices of rows/columns to be zero in the shift matrix and hence should sum to zero in the linear combination 
+            of the respecive left or right vectors.
         right : bool
             Whether to calculate coefficients for right spanning vectors.
 
@@ -270,8 +293,9 @@ class ShiftMatrix:
     def calculate_shift_matrix_generators(self, in_eigenspace=False) -> List[np.ndarray]:
         """
         Calculate individual shift generating vectors corresponding to each desired eigenvalue shift.  
-        If in_eigenspace is True, the individual generating vectors are calculated in the eigenbasis of the Jacobian, 
-        otherwise they are calculated in the physical basis. 
+        If in_eigenspace is True, the individual generating vectors are calculated in the eigenbasis of the Jacobian, simply being the coefficients
+        provided by the calculate_coefficients_one_side function. If in_eigenspace is False, the individual generating vectors are calculated 
+        in the physical basis by multiplying the coefficients with the Jacobian eigenvectors. 
         
         Parameters
         ----------
@@ -313,6 +337,21 @@ class ShiftMatrix:
         return left_generators, right_generators
 
     def cunstruct_individual_shift_matrices(self, in_eigenspace=False):
+        """
+        Constructs the individual shift matrix for each desired eigenvalue shift as the outer product of 
+        the corresponding left and right generating vectors, which are calculated in either the physical basis or the eigenbasis of the Jacobian 
+        depending on the value of in_eigenspace.
+
+        Parameters:
+        ----------
+            in_eigenspace : bool
+                Wheter to calculate in the eigenbasis of the Jacobian or in the physical basis.
+        
+        Returns:
+        ----------
+            individual_shift_matrices : list[np.ndarray]
+                List of individual shift matrices for each desired eigenvalue shift.
+        """
         left_generators, right_generators = self.calculate_shift_matrix_generators(in_eigenspace=in_eigenspace)
         individual_shift_matrices= [np.outer(p_i, q_i) for p_i, q_i in zip(left_generators, right_generators)] 
         return individual_shift_matrices
@@ -331,6 +370,7 @@ class ShiftMatrix:
 
         return self.shift_matrix
     
+
     def construct_from_scratch(self, eigenvalue_indices: List[int], shifts: np.ndarray, zero_rows: npt.NDArray[np.int_], zero_cols: npt.NDArray[np.int_]) -> np.ndarray:
         """
         Construct the shift matrix from scratch given the eigenvalue indices, shifts, and zero row/column constraints.
@@ -340,11 +380,11 @@ class ShiftMatrix:
         eigenvalue_indices : list[int]
             Indices of the eigenvalues to be shifted.
         shifts : np.ndarray
-            Desired shifts for the eigenvalues.
-        num_zero_rows : int
-            Number of rows to remain zero in the shifted matrix.
-        num_zero_cols : int
-            Number of columns to remain zero in the shifted matrix.
+            Desired shifts of the eigenvalues indexed by eigenvalue_indices.
+        num_zero_rows : np.ndarray[int]
+            Indices of rows to remain zero in the shifted matrix.
+        num_zero_cols : np.ndarray[int]
+            Indices of columns to remain zero in the shifted matrix.
 
         Returns
         -------
@@ -358,26 +398,6 @@ class ShiftMatrix:
         return self.construct_shift_matrix()
 
 
-    def plot_shift_matrix(self, eigenbasis: bool = False) -> None:
-        """
-        Plot the shift matrix in either the physical basis or the eigenbasis.
-
-        Parameters
-        ----------
-        eigenbasis : bool
-            Whether to plot the shift matrix in the eigenbasis.
-        """
-        import matplotlib.pyplot as plt
-
-        if self.shift_matrix is None:
-            raise ValueError("Shift matrix has not been constructed.")
-        S = self.shift_matrix
-        if eigenbasis:
-            S = self.eigenvectors.T @ S @ self.eigenvectors
-        plt.imshow(np.log10(np.abs(S)), cmap="viridis")
-        plt.colorbar(label="Log Magnitude")
-        plt.title("Shift Matrix (Eigenbasis)" if eigenbasis else "Shift Matrix (Physical Basis)")
-        plt.show()
 
 
 if __name__ == "__main__":
@@ -404,6 +424,3 @@ if __name__ == "__main__":
     print(path)
     loaded_S = shift_matrix_generator.load_from_file(path)
 
-    # Plot
-    shift_matrix_generator.plot_shift_matrix()
-    shift_matrix_generator.plot_shift_matrix(eigenbasis=True)
