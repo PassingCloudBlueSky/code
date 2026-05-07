@@ -32,6 +32,8 @@ class SecondOrderKuramotoModel(BaseModel):
         connectivity_matrix: np.ndarray,
         power_vector: np.ndarray,
         damping_coefficient: float,
+        ode_dimension: Optional[int] = None,
+        model_ode_args: Optional[Tuple[Any, ...]] = None,
     ):
         """
         Initialize the Kuramoto model with system parameters.
@@ -44,12 +46,15 @@ class SecondOrderKuramotoModel(BaseModel):
             Static power injection/consumption at each node.
         damping_coefficient : float
             Damping coefficient for the system.
+        ode_dimension : Optional[int]
+            Dimension of the ordinary differential equation system.
         """
         super().__init__()
         self.connectivity_matrix = np.array(connectivity_matrix, dtype=float)
         self.power_vector = np.array(power_vector, dtype=float)
         self.damping_coefficient = float(damping_coefficient)
-        
+        self.ode_dimension = ode_dimension if ode_dimension is not None else len(power_vector)*2
+        self.model_ode_args = model_ode_args
 
     @classmethod
     def from_random_sparse_graph(
@@ -81,9 +86,6 @@ class SecondOrderKuramotoModel(BaseModel):
         SecondOrderKuramotoModel
             Initialized model instance.
         """
-        if seed is not None:
-            random.seed(seed)
-            np.random.seed(seed)
 
         def generate_sparse_weighted_graph(size, edge_probability, max_weight):
             """
@@ -131,6 +133,55 @@ class SecondOrderKuramotoModel(BaseModel):
         p -= np.mean(p)
 
         return cls(K, p, damping_coefficient)
+
+    
+    
+    @classmethod
+    def from_soft_random_geometric_graph(
+        cls,
+        num_nodes: int,
+        radius: float = 0.1,
+        #max_weight: float = 2.0,
+        damping_coefficient: float = 0.01,
+        seed: Optional[int] = None,
+    ) -> "SecondOrderKuramotoModel":
+        """
+        Create a sparse, weighted, connected graph and initialize the model.
+
+        Parameters
+        ----------
+        num_nodes : int
+            Number of nodes in the network.
+        radius : float
+            Radius for the soft random geometric graph.
+        max_weight : float
+            Maximum weight for the edges.
+        damping_coefficient : float
+            Damping coefficient for the system.
+        seed : Optional[int]
+            Random seed for reproducibility.
+
+        Returns
+        -------
+        SecondOrderKuramotoModel
+            Initialized model instance.
+        """
+        if seed is None:
+            seed = np.random.randint(0,100)
+
+        # Generate the graph
+        G = nx.soft_random_geometric_graph(num_nodes, radius, dim=2, pos=None, p=2, p_dist=None, seed=seed)
+
+        nx.planar_layout(G) # planar layout for better visualization, does not change the graph structure
+        K = nx.to_numpy_array(G, weight="weight")
+
+        # Generate power vector (sum zero)
+        p = np.random.rand(num_nodes) - 0.5
+        p -= np.mean(p)
+
+        return cls(K, p, damping_coefficient)
+
+
 
 
     def compute_fixed_point(self, tol: float = 1e-10, max_iter: int = 1000) -> np.ndarray:
@@ -217,6 +268,8 @@ class SecondOrderKuramotoModel(BaseModel):
         np.save(os.path.join(save_dir, "power_vector.npy"), self.power_vector)
         params = {
             "damping_coefficient": self.damping_coefficient,
+            "ode_dimension": self.ode_dimension,
+            "model_ode_args": self.model_ode_args,
         }
         if self.fixed_point is not None:
             np.save(os.path.join(save_dir, "fixed_point.npy"), self.fixed_point)
@@ -341,7 +394,7 @@ class SecondOrderKuramotoModel(BaseModel):
         return np.sqrt(np.abs(eigvals) - (self.damping_coefficient**2) / 4)
     
         
-    def kuramoto_ode(self, t: float, y: np.ndarray,args) -> np.ndarray:
+    def model_ode(self, t: float, y: np.ndarray,args) -> np.ndarray:
         """
         Compute the time derivative of the state vector y at time t based on the second-order Kuramoto model.
 

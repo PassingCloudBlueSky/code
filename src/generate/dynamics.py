@@ -19,9 +19,9 @@ Perturbation functions:
 -------------------------------------------------------------------------------------------------------------------------------
 """
 
-def cos_perturbation_single_node(t,y,args):
+def sine_perturbation_single_node(t,y,args):
     """
-    Example perturbation function that computes a cosine perturbation based on the current time and state vector.
+    Example perturbation function that computes a sine perturbation based on the current time and state vector.
 
     Parameters:
     -------
@@ -48,9 +48,28 @@ def cos_perturbation_single_node(t,y,args):
 
     # Example perturbation: a simple cosine function of time with given amplitude and frequency
     perturbation_vector = np.zeros_like(y)
-    perturbation_vector[node_index] = amplitude * np.cos(2 * np.pi * frequency * t)
+    # TODO: loop over node_indices if node_index is array of int
+    perturbation_vector[node_index] = amplitude * np.sin( frequency * t)
 
     return perturbation_vector
+
+
+
+def spectrum_noise(spectrum_func, samples=1024, rate=44100):
+    """
+    Generates noise based on a given spectrum function. 
+    The spectrum function should take an array of frequencies as input 
+    and return the corresponding power spectral density values.
+
+    """
+    freqs = np.fft.rfftfreq(samples, 1.0/rate)
+    amplitudes = np.sqrt(spectrum_func(freqs))
+    phases = np.exp(2j * np.pi * np.random.rand(len(freqs)))
+    spectrum = amplitudes * phases
+    noise = np.fft.irfft(spectrum, samples)
+    return noise
+
+def white_noise
 
 
 """
@@ -83,9 +102,12 @@ def jacobian_shift(t,y,args):
         The computed shift value based on the current state vector and the provided shift matrix, ensuring that the fixed point remains unchanged.
     """
 
-    S, fixpoint, offset =args
+    shift_matrix_obj, model, offset =args
 
-    y_dot= S @ (y[:np.shape(S)[1]]-fixpoint+offset)
+    if offset is None:
+        offset=np.zeros_like(model.fixed_point)
+
+    y_dot= shift_matrix_obj.shift_matrix @ (y[:len(model.fixed_point)]-model.fixed_point+offset)
 
     return np.concatenate(( np.zeros(len(y)-len(y_dot)),y_dot))
 
@@ -115,9 +137,9 @@ def hessian_shift(t,y,args):
         The computed shift value based on the current state vector and the provided shift matrix, ensuring that the fixed point remains unchanged.
     """
 
-    S, fixpoint, offset =args
+    shift_matrix_obj, model, offset =args
 
-    y_dot= S @ np.kron((y[:np.shape(S)[1]]-fixpoint+offset),(y[:np.shape(S)[1]]-fixpoint+offset))
+    y_dot= shift_matrix_obj.shift_matrix @ np.kron((y[:len(model.fixed_point)]-model.fixed_point+offset),(y[:len(model.fixed_point)]-model.fixed_point+offset))
 
     return np.concatenate(( np.zeros(len(y)-len(y_dot)),y_dot))
  
@@ -168,7 +190,7 @@ def f(t,y,args):
     if perturbation is not None:
         perturbation_value = perturbation(t,y,perturbation_args)
         #accounting for models of higher order than the perturbation:
-        perturbation_value = np.concatenate((perturbation_value, np.zeros(len(y)-len(perturbation_value))))
+        perturbation_value = np.concatenate((np.zeros(len(y)-len(perturbation_value)),perturbation_value))
         
         y_dot+=perturbation_value
 
@@ -176,7 +198,7 @@ def f(t,y,args):
     if shift is not None:
         shift_value= shift(t,y,shift_args)
         #accounting for models of higher order than the shift:
-        y_dot+=np.concatenate((shift_value, np.zeros(len(y)-len(shift_value))))
+        y_dot+=np.concatenate((np.zeros(len(y)-len(shift_value)),shift_value))
     
     return y_dot
 
@@ -205,6 +227,6 @@ def integrate_f(t_final,y_0,args,t_0=0.,steps=8000):
     while integrator.successful() and step<steps:
         step+=1
         times[step]=integrator.t+dt
-        print("At time {}/{}".format(np.round(times[step],decimals=1),t_final),end="\r")
+        print("At time {}/{}".format(np.round(times[step],decimals=1),t_final)+" "*10,end="\r")
         y_vals[:,step]=integrator.integrate(integrator.t+dt)
     return times, y_vals

@@ -207,6 +207,7 @@ def plot_network(
     shift_matrix_obj: Optional[ShiftMatrix]= None,
     seed=42,
     edge_weight_key="weight",
+    edge_weight_visualization="length",
     vtn_edge_style="dashed",
     name="network.svg", 
     fs=6,
@@ -214,7 +215,8 @@ def plot_network(
     perturbed_node=None
 ):
     """
-    Plot a network with edge weights represented as thickness and an optional VTN visualization layered on top.
+    Plot a network with edge weights represented as thickness or as geometry (edge length), plus an
+    optional VTN visualization layered on top.
 
     Parameters
     ----------
@@ -227,6 +229,9 @@ def plot_network(
         Seed for reproducibility of the spring layout. Default is 42.
     edge_weight_key : str, default="weight"
         The key in the edge attributes that represents the weight. Default is "weight".
+    edge_weight_visualization : str, default="width"
+        How to visualize edge weights. "width" scales edge thickness by weight; "length" uses the
+        edge weights in the spring layout so stronger connections appear closer together.
     vtn_edge_style : str, default="dashed"
         Style for the edges connecting the highlighted nodes. Default is "dashed".
     name : str, default="network.svg"
@@ -244,24 +249,32 @@ def plot_network(
     str
         Path to the saved plot file.
     """
+    if edge_weight_visualization not in ("width", "length"):
+        raise ValueError("edge_weight_visualization must be 'width' or 'length'")
+
     # Create the graph from the connectivity matrix
     G = nx.from_numpy_array(model.connectivity_matrix)
 
-    # Generate positions for the nodes (use seed for reproducibility)
-    pos = nx.spring_layout(G, seed=seed)
-
     # Extract edge weights
     edge_weights = [d.get(edge_weight_key, 1.0) for _, _, d in G.edges(data=True)]
-
-    # Normalize edge weights for visual representation
     max_weight = max(edge_weights) if edge_weights else 1.0
-    edge_widths = [2 * (w / max_weight) for w in edge_weights]  # Scale edge thickness
+
+    # Generate positions for the nodes (use seed for reproducibility)
+    layout_weight = edge_weight_key if edge_weight_visualization == "length" else None
+    pos = nx.spring_layout(G, seed=seed, weight=layout_weight)
+
+    # Normalize edge widths for visual representation
+    if edge_weight_visualization == "length":
+        edge_widths = [1.0 for _ in edge_weights]
+    else:
+        edge_widths = [2 * (w / max_weight) for w in edge_weights]  # Scale edge thickness
     #edge_opacities = [0.2 + 0.8 * (w / max_weight) for w in edge_weights]  # Scale opacity
 
     # Create the figure and axis
     fig, ax = plt.subplots(figsize=(2, 1.6))
 
-    node_color=darkblue+(1.-darkblue)*0.35
+    #node_color=darkblue+(1.-darkblue)*0.35
+    node_color=node_colors_from_perturbation_distance(perturbed_node, model, cmap=plt.cm.cividis) #coloring nodes according to their distance to the perturbed node. The closer the node the more intense the color. Nodes further than max_distance are colored with the base color
     # Draw the base graph
     nx.draw(
         G,
@@ -448,7 +461,7 @@ def pre_and_post_shift_comparison_subplots(model:sokm, shift_matrix_obj:ShiftMat
     return paths
 
 
-def compose_pre_and_post_shift_comparison(model:sokm, shift_matrix_obj:ShiftMatrix, log=True, vtn_threshhold=1e-10, fontsize=5):
+def compose_pre_and_post_shift_comparison(model:sokm, shift_matrix_obj:ShiftMatrix, log=True, vtn_threshhold=1e-10, fontsize=5, perturbed_node=6):
 
     """
     Generate individual subplots comparing network response before and after applying eigenvalue shifts.
@@ -479,7 +492,7 @@ def compose_pre_and_post_shift_comparison(model:sokm, shift_matrix_obj:ShiftMatr
 
 
     print("Composing network visualizations and response amplitude plots...")
-    paths=pre_and_post_shift_comparison_subplots(model, shift_matrix_obj, log=log, threshhold=vtn_threshhold,fs=fontsize)
+    paths=pre_and_post_shift_comparison_subplots(model, shift_matrix_obj, log=log, threshhold=vtn_threshhold,fs=fontsize, perturbed_node=perturbed_node)
 
     fig = sg.SVGFigure("7in", "2.2in")
     #fig.append(sc.Grid(10,10)) # visual grid for ease of aligning figures
@@ -514,21 +527,307 @@ def compose_pre_and_post_shift_comparison(model:sokm, shift_matrix_obj:ShiftMatr
             parent_height=110,parent_width=400,output_height=115*4,output_width=400*4)
 
 
+def generate_dynamics_subplots(t_final,
+                               model:sokm,
+                               shift_matrix_obj:ShiftMatrix,
+                               steps=8000,
+                               y_0=None,
+                               perturbation=None,
+                               name="dynamics_comparison", 
+                               save_dir=None,
+                               fontsize=5):
+    """
+    Generates plots with perturbation frequencies chosen to be 
+    i) the original resonance frequency and 
+    ii) the shifted resonance frequency
+    iii) a non resonant frequency for comparison.
+    for different dynamics setups (with/without perturbation, with/without shift) 
+    
+    Parameters
+    ----------
+    t_final : float
+        Final simulation time.
+    model : BaseModel
+        The system model (e.g., SecondOrderKuramotoModel).
+    shift_matrix_obj : ShiftMatrix
+        The shift matrix object containing shift information.
+    steps : int, default=8000
+        Number of integration steps.
+    y_0 : array-like, optional
+        Initial condition. If None, uses fixed point with random offset.
+    perturbation : dict, optional
+        Dictionary with perturbation parameters:
+        - 'amplitude': float, amplitude of cosine perturbation
+        - 'node_index': int, index of node to perturb (default: 0)
+        
+    Returns
+    -------
+    list[str]
+        Paths to saved SVG files for each scenario (original resonance, shifted resonance, non-resonant).
+    """
+    
+    # Get all original resonance frequencies
+    all_orig_freqs = model.predict_resonance_frequencies()
+    all_orig_freqs = all_orig_freqs[np.invert(np.isnan(all_orig_freqs))]
+    
+    # Track the first shifted eigenvalue to compare before/after
+    track_idx = shift_matrix_obj.eigenvalue_indices[0]
+    
+    # i) Original resonance frequency for this tracked eigenvalue
+    original_freq = all_orig_freqs[track_idx]
+    prior_shift_freqs=all_orig_freqs[shift_matrix_obj.eigenvalue_indices]
+    
+    # Create modified eigenvalue array with shifts applied
+    shifted_eigvals = shift_matrix_obj.eigenvalues.copy()
+    shifted_eigvals[shift_matrix_obj.eigenvalue_indices] += shift_matrix_obj.shifts
+    
+    # Get all shifted resonance frequencies
+    all_shifted_freqs = model.predict_resonance_frequencies(shifted_eigvals=shifted_eigvals)
+    all_shifted_freqs = all_shifted_freqs[np.invert(np.isnan(all_shifted_freqs))]
+    
+    # ii) Shifted resonance frequency for the same tracked eigenvalue
+    shifted_freq = all_shifted_freqs[track_idx] if track_idx < len(all_shifted_freqs) else 0.05
+    
+    # iii) Non-resonant frequency (well outside the resonance range for comparison)
+    freq_range = (np.min(all_orig_freqs), np.max(all_orig_freqs)) if len(all_orig_freqs) > 0 else (0.01, 1.0)
+    non_resonant_freq = freq_range[0] * 0.5  # Use a frequency well outside the resonance range
+    
+    # Set default perturbation parameters
+    if perturbation is None:
+        perturbation = {'amplitude': 0.1, 'node_index': 0}
+    
+    amplitude = perturbation.get('amplitude', 0.1)
+    node_index = perturbation.get('node_index', 0)
+    
+    
+    # Create three scenarios with different perturbation frequencies
+    scenarios = [
+        ("offset_only", 0.0, "random offset")]
+    for i in np.invert(range(0, len(prior_shift_freqs))):
+        scenarios.append(
+            (f"{i}_original_resonance", prior_shift_freqs[i], r"$\omega=$"+f"{np.round(prior_shift_freqs[i], 3)}")
+        )
+      #("shifted_resonance", shifted_freq),
+        #("non_resonant", non_resonant_freq)
+   
+
+    fig,ax=plt.subplots(2, len(scenarios),figsize=(7, 3), sharey="row", gridspec_kw=dict(hspace=0.1, wspace=0.1))
+    
+    
+    node_colors=node_colors_from_perturbation_distance(node_index, model, cmap=plt.cm.cividis)
+
+    # looping over the scenarios to generate the corresponding plots
+    for i, (scenario_name, freq,title) in enumerate(scenarios):
+        print(f"Generating plot for scenario: {scenario_name} with perturbation frequency: {freq:.4f}")
+
+        # Construct perturbation arguments
+        if scenario_name == "offset_only":
+            pert = (None,None)  # No perturbation for the offset-only scenario
+        else:
+            pert_args = (amplitude, freq, node_index)
+            pert = (dynamics.sine_perturbation_single_node, pert_args)
+        
+        # Construct shift arguments
+        shift_args = (shift_matrix_obj, model, None)
+        shift = (dynamics.jacobian_shift, shift_args)
+        
+        # Call plot_dynamics_scenarios with these perturbation and shift arguments to plot the row comaptison for the scenario onto the existing axes
+        ax[:,i] = plot_dynamics_scenario(
+            t_final=t_final,
+            args=pert + shift,
+            model=model,
+            y_0=y_0,
+            steps=steps,
+            offset_strength=0.1,
+            meta_scenario_name=scenario_name,
+            ax=ax[:, i],
+            node_colors=node_colors
+        )
+
+        # managing x and y axis ticks and labels for aesthetics
+        ax[0,i].tick_params(
+            axis='x',          # changes apply to the x-axis
+            which='both',      # both major and minor ticks are affected
+            bottom=False,      # ticks along the bottom edge are off
+            top=False,         # ticks along the top edge are off
+            labelbottom=False)
+        ax[0,i].set_title(title, fontsize=fontsize)
+        ax[1,i].set_xlabel(r"$t$", fontsize=fontsize)
+        ax[0,i].set_xlim((0,t_final))
+        ax[1,i].set_xlim((0,t_final))
+        if i>0: #turning of y axis ticks and labels for the right two columns of plots
+            ax[1,i].tick_params(
+                axis='y',          # changes apply to the x-axis
+                which='both',      # both major and minor ticks are affected
+                left=False,      # ticks along the bottom edge are off
+                right=False)
+            ax[0,i].tick_params(
+                axis='y',          # changes apply to the x-axis
+                which='both',      # both major and minor ticks are affected
+                left=False,      # ticks along the bottom edge are off
+                right=False)
+
+    ax[0,0].set_ylabel(r"$\theta_n(t)$", fontsize=fontsize)
+    ax[0,0].tick_params(axis='y', labelsize=fontsize)
+    ax[1,0].tick_params(axis='y', labelsize=fontsize)
+    ax[1,0].set_ylabel(r"$\theta_{n,S}(t)$", fontsize=fontsize)
+    
+
+    # saving the composed figure as SVG and PNG
+    if save_dir is None:
+        save_dir = os.path.join(shift_matrix_obj.current_dir, "plots")
+    svg_path=save_figure(fig, save_dir=save_dir, name=name+".svg")
+    png_path=os.path.join(save_dir,name+".png")
+    svg2png(url=svg_path,write_to=png_path,
+                parent_height=110,parent_width=400,output_height=115*4,output_width=400*4)
+    return svg_path
+
+
+def generate_resonance_comparison(t_final,
+                               model:sokm,
+                               shift_matrix_obj:ShiftMatrix,
+                               steps=8000,
+                               y_0=None,
+                               perturbation=None,
+                               name="resonance_comparison", 
+                               save_dir=None,
+                               fontsize=5):
+    """
+    Generates plots with the perturbation frequency chosen to be the original resonance frequency 
+    for different dynamics setups ( with/without shift) 
+    
+    Parameters
+    ----------
+    t_final : float
+        Final simulation time.
+    model : BaseModel
+        The system model (e.g., SecondOrderKuramotoModel).
+    shift_matrix_obj : ShiftMatrix
+        The shift matrix object containing shift information.
+    steps : int, default=8000
+        Number of integration steps.
+    y_0 : array-like, optional
+        Initial condition. If None, uses fixed point with random offset.
+    perturbation : dict, optional
+        Dictionary with perturbation parameters:
+        - 'amplitude': float, amplitude of cosine perturbation
+        - 'node_index': int, index of node to perturb (default: 0)
+        
+    Returns
+    -------
+    list[str]
+        Paths to saved SVG files for each scenario (original resonance, shifted resonance, non-resonant).
+    """
+    
+    # Get all original resonance frequencies
+    all_orig_freqs = model.predict_resonance_frequencies()
+    all_orig_freqs = all_orig_freqs[np.invert(np.isnan(all_orig_freqs))]
+    
+    # Track the first shifted eigenvalue to compare before/after
+    track_idx = shift_matrix_obj.eigenvalue_indices[0]
+    
+    # i) Original resonance frequency for this tracked eigenvalue
+    original_freq = all_orig_freqs[track_idx]
+    
+    # Set default perturbation parameters
+    if perturbation is None:
+        perturbation = {'amplitude': 0.1, 'node_index': 0}
+    
+    amplitude = perturbation.get('amplitude', 0.1)
+    node_index = perturbation.get('node_index', 0)
+    
+    
+    # Create three scenarios with different perturbation frequencies
+    scenarios = [
+        #("offset_only", 0.0),
+        ("original_resonance", original_freq),
+        #("shifted_resonance", shifted_freq),
+        #("non_resonant", non_resonant_freq)
+    ]
+
+    fig,ax=plt.subplots(2,figsize=(7, 3), sharey="all", gridspec_kw=dict(hspace=0.1, wspace=0.1))
+    
+    
+    node_colors=node_colors_from_perturbation_distance(node_index, model, cmap=plt.cm.cividis)
+
+    # looping over the scenarios to generate the corresponding plots
+    for i, (scenario_name, freq) in enumerate(scenarios):
+        print(f"Generating plot for scenario: {scenario_name} with perturbation frequency: {freq:.4f}")
+
+        # Construct perturbation arguments
+        if scenario_name == "offset_only":
+            pert = (None,None)  # No perturbation for the offset-only scenario
+        else:
+            pert_args = (amplitude, freq, node_index)
+            pert = (dynamics.sine_perturbation_single_node, pert_args)
+        
+        # Construct shift arguments
+        shift_args = (shift_matrix_obj, model, None)
+        shift = (dynamics.jacobian_shift, shift_args)
+        
+        # Call plot_dynamics_scenarios with these perturbation and shift arguments to plot the row comaptison for the scenario onto the existing axes
+        ax[:] = plot_dynamics_scenario(
+            t_final=t_final,
+            args=pert + shift,
+            model=model,
+            y_0=y_0,
+            steps=steps,
+            offset_strength=0.1,
+            meta_scenario_name=scenario_name,
+            ax=ax[:],
+            node_colors=node_colors
+        )
+
+        # managing x and y axis ticks and labels for aesthetics
+        ax[0].tick_params(
+            axis='x',          # changes apply to the x-axis
+            which='both',      # both major and minor ticks are affected
+            bottom=False,      # ticks along the bottom edge are off
+            top=False,         # ticks along the top edge are off
+            labelbottom=False)
+        ax[1].tick_params(labelbottom=r"$t$", labelsize=fontsize)
+        
+        if i>0: #turning of y axis ticks and labels for the right two columns of plots
+            ax[1].tick_params(
+                axis='y',          # changes apply to the x-axis
+                which='both',      # both major and minor ticks are affected
+                left=False,      # ticks along the bottom edge are off
+                right=False)
+            ax[0].tick_params(
+                axis='y',          # changes apply to the x-axis
+                which='both',      # both major and minor ticks are affected
+                left=False,      # ticks along the bottom edge are off
+                right=False)
+        if i==0: #setting y axis label for the left column of plots
+            ax[0].set_ylabel(r"$\theta_n(t)$", fontsize=fontsize)
+            ax[1].set_ylabel(r"$\theta_{n,S}(t)$", fontsize=fontsize)
+    
+    # saving the composed figure as SVG and PNG
+    if save_dir is None:
+        save_dir = os.path.join(shift_matrix_obj.current_dir, "plots")
+    svg_path=save_figure(fig, save_dir=save_dir, name=name+".svg")
+    png_path=os.path.join(save_dir,name+".png")
+    svg2png(url=svg_path,write_to=png_path,
+                parent_height=110,parent_width=400,output_height=115*4,output_width=400*4)
+    return svg_path
+
+
 if __name__ == "__main__":
     
     # Create a model and compute the Jacobian
-    model = sokm.from_random_sparse_graph(num_nodes=8, edge_probability=0.3, damping_coefficient=0.01)
+    #model = sokm.from_random_sparse_graph(num_nodes=8, edge_probability=0.3, damping_coefficient=0.01)
+    #model = sokm.from_soft_random_geometric_graph(num_nodes=8, radius=0.3, damping_coefficient=0.01)
     #model.compute_jacobian()
     #model.summary()
-    #model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\Instance_2026-04-07_11-21-27")
+    model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\Instance_2026-05-07_11-13-11")
 
     # Create a ShiftMatrix object
     shift_matrix_obj = ShiftMatrix(model=model)
 
     # Generate a shift matrix
-    eigenvalue_indices = [ 5,6]
-    shifts = np.array([-0.6, 0.3])
-    zero_rows = np.array([3,4,5,6,7])
+    eigenvalue_indices = [ 4,5]
+    shifts = np.array([-0.2, 0.3],dtype=float)
+    zero_rows = np.array([5,6,7],dtype=int)
     #zero_rows=np.arange(16)
     zero_cols = np.array([],dtype=int)
     shift_matrix_obj.construct_from_scratch(eigenvalue_indices, shifts, zero_rows, zero_cols)
@@ -540,6 +839,12 @@ if __name__ == "__main__":
 
     
     #shift_matrix_obj= ShiftMatrix.load_from_file("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\Instance_2026-03-31_10-32-17\\shift_matrix.json")
-    compose_pre_and_post_shift_comparison(model, shift_matrix_obj)
-
+    perturbed_node=0
+    compose_pre_and_post_shift_comparison(model, shift_matrix_obj, perturbed_node=perturbed_node)
+    print("Done with pre and post shift comparison visualization")
     compose_shift_matrix_construction_visualization(shift_matrix_obj, log=True, absolute=True)
+    print("Done with shift matrix construction visualization")
+    generate_dynamics_subplots(400,model,shift_matrix_obj, perturbation={'amplitude': 0.05, 'node_index': perturbed_node},steps=2000,fontsize=10)
+    print("Done with dynamics subplots")
+    #generate_resonance_comparison(400,model,shift_matrix_obj, perturbation={'amplitude': 0.05, 'node_index': perturbed_node},fontsize=10)
+    #print("Done with resonance comparison visualization")

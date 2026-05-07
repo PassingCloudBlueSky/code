@@ -16,13 +16,25 @@ class BaseModel(ABC):
         self.fixed_point: Optional[np.ndarray] = None
         self.jacobian_matrix: Optional[np.ndarray] = None
         self.current_dir: Optional[str] = None
-
+        self.ode_dimension: Optional[int] = None  # Dimension of the ODE system, to be set by subclasses
+        model_args: Optional[Tuple[Any, ...]] = None
     @abstractmethod
     def compute_jacobian(self) -> np.ndarray:
         """
         Compute the Jacobian matrix of the system.
         Must be implemented by subclasses.
         """
+        pass
+
+    def compute_fixed_point(self) -> np.ndarray:
+        """
+        Compute the fixed point of the system.
+        Subclasses can override this if they have a specific method for finding fixed points.
+        """
+        #if self.fixed_point is not None:
+        #    return self.fixed_point
+        # Default implementation: find fixed point by iterating from a random initial condition
+
         pass
 
     def save_parameters(self, base_dir: str = "data/BaseModel") -> str:

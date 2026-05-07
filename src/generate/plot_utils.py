@@ -14,6 +14,7 @@ plt.rcParams['font.family'] = 'serif'  # Use LaTeX's default serif font
 plt.rcParams['text.latex.preamble'] = r'\\usepackage{amsmath}'  # Optional: Add LaTeX packages
 """
 import numpy as np
+from base_model import BaseModel
 from kuramoto_class import SecondOrderKuramotoModel as sokm 
 from shift_matrix import ShiftMatrix
 import networkx as nx
@@ -83,6 +84,38 @@ def create_shift_colors(num_shifts) -> list:
         shift_colors.append(list(individual_shift_colors_cmap (i / (num_shifts - 1))))
 
     return shift_colors
+
+
+def node_colors_from_perturbation_distance(perturbation_source: int, model:BaseModel, cmap=plt.cm.viridis, weight="weight"):
+    """
+    Generate colors for nodes based on their distance from a perturbation source.
+
+    Parameters:
+    -------
+        perturbation_source:
+            The node index from which to calculate distances.
+        model:
+            The model containing the jacobian matrix.
+        cmap:
+            The colormap to use for generating colors. Default is plt.cm.viridis.
+
+    Returns:
+    -------
+        node_colors:
+            A list of RGBA colors for each node based on their distance from the perturbation source.
+    """
+
+    # convert network to binary
+    G = nx.from_numpy_array((model.jacobian_matrix!=0).astype(int))
+    distances = nx.shortest_path(G,source=perturbation_source,weight=weight)
+    #print("Distances from perturbation source node:", distances)
+    distances= [sum(distances[i]) for i in range(len(distances))]
+    
+    # pick colors from cmap based on distance to perturbation source node
+    node_colors = [cmap(distances[i]/max(distances)) for i in range(len(distances))]
+    #node_colors=np.insert(node_colors, perturbation_source, [cmap(0)], axis=0) # set color of perturbation source node to the color corresponding to distance 0
+    # return list of node colors
+    return node_colors
 
 
 def save_figure(fig, save_dir: str, name: str) -> str:
@@ -518,7 +551,15 @@ def compose_shift_matrix_construction_visualization(shift_matrix_obj:ShiftMatrix
     return save_dir
 
 
-def plot_dynamics(t_final,y_0,args,t_0=0.,steps=8000):
+def plot_dynamics(t_final,
+                    y_0,
+                    args,
+                    axes=None,
+                    t_0=0.,
+                    steps=8000,
+                    name: Optional[str]=None,
+                    save_dir: Optional[str]=None,
+                    node_colors=None):
     """
     Function to plot the numerically integrated state vector y at time t, given the model and perturbation.
 
@@ -529,30 +570,122 @@ def plot_dynamics(t_final,y_0,args,t_0=0.,steps=8000):
     y_0: array-like
         Initial value.
     args: tuple
-        Tuple of the shape (model_ode, model_args, perturbation, perturbation_args) where:
+        Tuple of the shape (model_ode, model_args, perturbation, perturbation_args, shift, shift_args) where:
         - model_ode: function
             The model specific function that computes the time derivative of the state vector based on the model.
         - model_args: tuple
             Arguments for the model specific function.
-        - perturbation: function
-            The perturbation function that computes the effect of the perturbation on the state vector. If set to None no peturbation will be added.
-        - perturbation_args: tuple
+        - perturbation: function or None
+            The perturbation function that computes the effect of the perturbation on the state vector.
+            If set to None no perturbation is added.
+        - perturbation_args: tuple or None
             Arguments for the perturbation function.
-        - shift: function
-            The shift function that computes the effect of the shift on the state vector. If set to None no shift will be added.
-        - shift_args: tuple
+        - shift: function or None
+            The shift function that computes the effect of the shift on the state vector.
+            If set to None no shift is added.
+        - shift_args: tuple or None
             Arguments for the shift function.
+    axes: matplotlib.axes._axes.Axes, optional
+        Axis to draw the dynamics on. If None, a new figure is created.
+    name: str, optional
+        File name when saving the plot if axes is not provided.
+    save_dir: str, optional
+        Directory to save the figure when axes is not provided.
 
     Returns:
     -------
-    string
-        Path to the generated plot.
+    Optional[str]
+        Path to the generated plot when a new figure was created, otherwise None.
+    """
+    created_fig = False
+    if axes is None:
+        fig, axes = plt.subplots(1, 1, figsize=(2.1, 0.7))
+        created_fig = True
+
+    t, y = dynamics.integrate_f(t_final, y_0, args, t_0=t_0, steps=steps)
+    for i in range(int(np.shape(y)[0] / 2)):
+        axes.plot(t, y[i, :],color=node_colors[i] if node_colors is not None else None, linewidth=0.5)
+
+    # aesthetics and labels
+
+    if created_fig:
+        if save_dir is None:
+            save_dir = os.path.join(os.getcwd(), "unorganized_plots")
+        return save_figure(fig, save_dir=save_dir, name=name if name is not None else "dynamics.svg")
+
+
+
+
+def plot_dynamics_scenario(t_final: float, args, model: BaseModel, y_0=None, steps=8000, offset_strength=0.05, meta_scenario_name="default",
+                    save_dir: Optional[str]=None, perturbation_and_offset=False, ax=None, node_colors=None):
+    """
+    Generates two panels comparing the dynamics of the network with and without vtn for a given scenario.
+
+    If axes are provided, only the unshifted plot is drawn to axes[0] and the shifted plot
+    to axes[1]. If no perturbation is provided, only the offset transient comparison is created.
     """
 
-    t,y=dynamics.integrate_f(t_final,y_0,args,t_0=0.,steps=8000)
-    for i in range(int(np.shape(y)[0]/2)):
-        plt.plot(t,y[i,:])
-    plt.show()
+    # unpacking arguments
+    instance = (model.model_ode, model.model_ode_args)
+    pert = args[0:2]
+    shift = args[2:4]
+    no_perturbation = (pert[0] is None)
+
+    dim = np.shape(model.jacobian_matrix)[0]
+
+    # set y_0 to fixpoint wiht an offset if no perturbation is provided or perturbation_and_offset is True, unless y_0 is provided
+    if y_0 is None:
+        if model.fixed_point is None:
+            model.compute_fixed_point()
+        fixpoint = model.fixed_point
+        y_0 = np.zeros(model.ode_dimension)
+        y_0[:dim] = fixpoint
+    
+        # creating offset if desired
+        if no_perturbation or perturbation_and_offset:
+            offset = np.random.rand(dim) * offset_strength
+            offset -= np.sum(offset) / dim
+            y_0[:dim] += offset
+
+    # creating figure if no axes have been provided for plotting
+    if ax is None:
+        fig,ax=plt.subplots(2,1,figsize=(3, 2), sharex=True)
+
+        # setting save_dir to current instance directory not provided as a parameter to save the generated figure
+        if save_dir is None:
+            if model.current_dir is None:
+                model.save_parameters()
+            save_dir=model.current_dir
+            save_dir=os.path.join(save_dir,"plots") 
+    else:
+        save_dir=None
+
+    # setting up shifted and unshifted cases for plotting
+    cases=[("unaltered", instance+pert+(None,None)),
+           ("shifted", instance+pert+shift)]
+    
+    # looping over cases and plotting dynamics for each case in the respective subplot
+    for i, (name, args) in enumerate(cases):
+        print("Plotting case: ", name)
+        y_0_case = y_0.copy()
+        plot_dynamics(t_final, y_0_case, args,
+                    axes=ax[i],
+                    t_0=0.,
+                    steps=steps,node_colors=node_colors)
+
+    # saving figure if it was created in this function, otherwise just returning the axes for further use
+    if save_dir is not None:
+        print(save_dir)
+        svg_path=save_figure(fig, save_dir=save_dir, name=meta_scenario_name+"_dynamics.svg")
+        png_path=os.path.join(save_dir,meta_scenario_name+"_dynamics.png")
+        svg2png(url=svg_path,write_to=png_path,
+                parent_height=110,parent_width=400,output_height=115*4,output_width=400*4)
+        return svg_path
+    else:
+        return ax
+
+
+
 
 
 # Example usage
@@ -591,13 +724,12 @@ if __name__ == "__main__":
     amplitude= delta
     frequency=0.1
     pert_args=amplitude, frequency, node_index 
-    pert=(dynamics.cos_perturbation_single_node,pert_args)
-    pert=(None,None)
-    shift_args= shift_matrix_obj.shift_matrix, fixpoint, offset
+    pert=(dynamics.sine_perturbation_single_node,pert_args)
+    shift_args= shift_matrix_obj, model, None
     shift=(dynamics.jacobian_shift,shift_args)
     #shift=(None,None)
-    plot_dynamics(600,y_0,args=(model.kuramoto_ode,None)+pert+shift)
-
+    #plot_dynamics(600,y_0,args=(model.model_ode,None)+pert+shift)
+    plot_dynamics_scenario(t_final=600,args=(None,None)+shift, model=model, y_0=None, steps=5000, offset_strength=0.1,meta_scenario_name= "none")
     #resonance_plot(model,log=True, show_resonance_location=True)
     #pre_and_post_shift_comparison_subplots(model, shift_matrix_obj)
     
