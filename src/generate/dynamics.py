@@ -12,12 +12,15 @@ based on the model's ordinary differential equations (ODEs) and any specified pe
 import numpy as np
 from scipy.integrate import solve_ivp
 from scipy.integrate import ode
+import matplotlib.pyplot as plt
 
 
 """ 
 Perturbation functions: 
 -------------------------------------------------------------------------------------------------------------------------------
 """
+
+
 
 def sine_perturbation_single_node(t,y,args):
     """
@@ -54,23 +57,88 @@ def sine_perturbation_single_node(t,y,args):
     return perturbation_vector
 
 
+def perturbation_from_noise(t,y,args):
 
-def spectrum_noise(spectrum_func, samples=1024, rate=44100):
+    times , noise = args
+
+    current_index=np.searchsorted(times,t)
+    perturbation_vector = np.zeros_like(y)
+    perturbation_vector[:len(noise)]=noise[current_index]
+
+    return perturbation_vector
+
+
+
+def spectrum_noise(spectrum_func, func_params, max_val=0.05, steps=1024, samples_per_step=10, rate=1.):
     """
     Generates noise based on a given spectrum function. 
     The spectrum function should take an array of frequencies as input 
     and return the corresponding power spectral density values.
-
+    Parameters:
+    -------------
+    spectrum_func: function
+        A function that takes an array of frequencies and returns the corresponding power spectral density values.
+    max_val: float
+        The maximum amplitude of the generated noise.
+    steps: int
+        The number of steps to generate.
+    samples_per_step: int
+        The number of samples per step.
+    rate: float
+        The sampling rate (samples per unit time). So the total time duration t_max=samples/rate.
     """
+    steps +=1 # to ensure we have the correct number of samples after inverse FFT
+    samples=steps*samples_per_step
     freqs = np.fft.rfftfreq(samples, 1.0/rate)
-    amplitudes = np.sqrt(spectrum_func(freqs))
+    psd = spectrum_func(freqs, **func_params)
+    amplitudes = np.sqrt(psd)
     phases = np.exp(2j * np.pi * np.random.rand(len(freqs)))
     spectrum = amplitudes * phases
-    noise = np.fft.irfft(spectrum, samples)
-    return noise
+    noise = np.fft.irfft(spectrum, samples)[np.arange(steps)*samples_per_step]
+    integrated_noise = np.cumsum(noise)
+    #scaling = max_val/np.max(np.abs(integrated_noise))  # Normalize the integrated noise to the desired maximum amplitude to counteract random walk
+    scaling = max_val/np.max(np.abs(noise)) 
+    return freqs, psd * scaling, (noise - integrated_noise[-1]/len(integrated_noise))* scaling
 
-def white_noise
 
+def exp_decay_spectrum(freqs, max_ampl=1.0, cutoff=100):
+    """
+    Example spectrum function that generates an exponentially decaying spectrum.
+    """
+    return max_ampl*np.exp(-freqs / cutoff)
+
+
+def gaussian_spectrum(freqs, max_ampl=1.0, center=0.5, width=0.1):
+    """
+    Example spectrum function that generates a Gaussian spectrum.
+    """
+    return max_ampl*np.exp(-0.5 * ((freqs - center) / width) ** 2)
+
+def exp_gaussian_spectrum(freqs, max_ampl=1.0, cutoff=100, center=0.5, width=0.1):
+    """
+    Example spectrum function that generates a combination of an exponentially decaying spectrum and a Gaussian spectrum.
+    """
+    return exp_decay_spectrum(freqs, max_ampl=max_ampl, cutoff=cutoff) + gaussian_spectrum(freqs, max_ampl=10*max_ampl, center=center, width=width)
+
+def white_spectrum(freqs, max_ampl=1.0, freq_min=0, freq_max=np.inf):
+    """
+    Example spectrum function that generates a white noise spectrum (constant power across all frequencies).
+    """
+    psd= np.zeros_like(freqs)
+    psd[ freqs>=freq_min] = max_ampl
+    psd[ freqs>freq_max] = 0
+    return psd
+
+def realistic_spectrum(freqs, min=0.5,cutoff=6):
+    """
+    Example spectrum function that generates a more realistic spectrum by combining an exponentially decaying spectrum with a Gaussian peak.
+    """
+    psd = np.zeros_like(freqs)
+    psd [freqs<cutoff]= freqs[freqs<cutoff]**(-5/3)
+    psd [freqs<min] = 0
+    plt.plot(freqs[freqs<cutoff]*2*np.pi, psd[freqs<cutoff])
+    plt.show()
+    return psd
 
 """
 shift functions:
@@ -230,3 +298,15 @@ def integrate_f(t_final,y_0,args,t_0=0.,steps=8000):
         print("At time {}/{}".format(np.round(times[step],decimals=1),t_final)+" "*10,end="\r")
         y_vals[:,step]=integrator.integrate(integrator.t+dt)
     return times, y_vals
+
+
+if __name__ == "__main__":
+    #print(np.shape(spectrum_noise(exp_decay_spectrum, func_params={'max_ampl': 1.0, 'cutoff': 10}, samples=1024, rate=10)))
+    freqs= np.fft.rfftfreq(8000, 1.0/20)
+    #plt.plot(freqs, exp_decay_spectrum(freqs, max_ampl=1.0, cutoff=1/(2*np.pi))+gaussian_spectrum(freqs, max_ampl=1.0, center=0.5, width=0.05))
+    #plt.plot(np.arange(8000)[:100]*0.1, spectrum_noise(exp_decay_spectrum, func_params={'max_ampl': 1.0, 'cutoff': 3/(2*np.pi)} , samples=8000, rate=20)[1][:100])
+    #plt.plot(np.arange(8000)[:100]*0.1, spectrum_noise(gaussian_spectrum, func_params={'max_ampl': 1.0, 'center': 0.5, 'width': 0.05} , samples=8000, rate=20)[1][:100])
+    psd,noise=spectrum_noise(exp_gaussian_spectrum, func_params={'max_ampl': 1.0, 'cutoff': 3/(2*np.pi), 'center': 0.5, 'width': 0.05} , samples=8000, rate=20)
+    plt.plot(freqs, psd)
+    plt.plot(np.arange(8000)[:100]*0.1, noise[:100])
+    plt.show()

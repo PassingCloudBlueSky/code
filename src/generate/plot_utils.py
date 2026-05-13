@@ -362,7 +362,7 @@ def shift_matrix_construction_visualization_subplots(shift_matrix_obj:ShiftMatri
     dim=jacobian.shape[0]
     if shift_matrix_obj.current_dir == None:
         shift_matrix_obj.save_parameters()
-    save_dir=os.path.join(shift_matrix_obj.current_dir,"plots")
+    save_dir=shift_matrix_obj.current_dir
 
     # If log scaling is desired, take the absolute value of the data in order to avoid evaluing log of negative values
     if log or absolute:
@@ -543,9 +543,9 @@ def compose_shift_matrix_construction_visualization(shift_matrix_obj:ShiftMatrix
     line=sc.Line([(5,70),(45+70*(len(file_paths_physical)-1),70)],width=0.8)
     fig.append([line])
 
-    save_dir=os.path.join(shift_matrix_obj.current_dir,"plots\\combined.svg")
+    save_dir=os.path.join(shift_matrix_obj.current_dir,"combined.svg")
     fig.save(save_dir)
-    png_path=os.path.join(shift_matrix_obj.current_dir,"plots\\combined.png")
+    png_path=os.path.join(shift_matrix_obj.current_dir,"combined.png")
     svg2png(url=save_dir,write_to=png_path,
             parent_height=150,parent_width=70*len(file_paths_eigenspace),output_height=1500,output_width=700*len(file_paths_eigenspace))
     return save_dir
@@ -616,8 +616,8 @@ def plot_dynamics(t_final,
 
 
 
-def plot_dynamics_scenario(t_final: float, args, model: BaseModel, y_0=None, steps=8000, offset_strength=0.05, meta_scenario_name="default",
-                    save_dir: Optional[str]=None, perturbation_and_offset=False, ax=None, node_colors=None):
+def plot_dynamics_scenario(t_final: float, args, model: BaseModel, y_0=None, steps=8000, meta_scenario_name="default",
+                    save_dir: Optional[str]=None, ax=None, node_colors=None):
     """
     Generates two panels comparing the dynamics of the network with and without vtn for a given scenario.
 
@@ -641,9 +641,9 @@ def plot_dynamics_scenario(t_final: float, args, model: BaseModel, y_0=None, ste
         y_0 = np.zeros(model.ode_dimension)
         y_0[:dim] = fixpoint
     
-        # creating offset if desired
-        if no_perturbation or perturbation_and_offset:
-            offset = np.random.rand(dim) * offset_strength
+        # creating offset if no perturbation is provided
+        if pert[0] is None:
+            offset = np.random.rand(dim) * pert[1]
             offset -= np.sum(offset) / dim
             y_0[:dim] += offset
 
@@ -685,7 +685,112 @@ def plot_dynamics_scenario(t_final: float, args, model: BaseModel, y_0=None, ste
         return ax
 
 
+def plot_scenario_comparison(t_final,
+                               model:sokm,
+                               shift_matrix_obj:ShiftMatrix,
+                               scenarios,
+                               steps=8000,
+                               y_0=None,
+                               name="dynamics_comparison", 
+                               save_dir=None,
+                               fontsize=5,
+                               perturbed_node=1):
 
+
+    """
+    
+
+
+    Arguments:
+        scenarios: list of touples the tuples have the form (title, pert) where 
+            title: string
+                title of the scenario.
+            pert: tuple
+                of the form (perturbation, perturbation_args) that defines the perturbation for the scenario
+         """
+
+    fig,ax=plt.subplots(2, len(scenarios),figsize=(7, 3), sharey="row", gridspec_kw=dict(hspace=0.1, wspace=0.1))
+    
+    
+    node_colors=node_colors_from_perturbation_distance(perturbed_node, model, cmap=plt.cm.cividis)
+
+    # Construct shift arguments
+    shift_args = (shift_matrix_obj, model, None)
+    shift = (dynamics.jacobian_shift, shift_args)
+        
+
+    # looping over the scenarios to generate the corresponding plots
+    for i, (title, pert ) in enumerate(scenarios):
+        print(f"Generating plot for scenario: {title}")
+
+        # Call plot_dynamics_scenarios with these perturbation and shift arguments to plot the row comaptison for the scenario onto the existing axes
+        ax[:,i] = plot_dynamics_scenario(
+            t_final=t_final,
+            args=pert + shift,
+            model=model,
+            y_0=y_0,
+            steps=steps,
+            meta_scenario_name=title,
+            ax=ax[:, i],
+            node_colors=node_colors
+        )
+
+        # managing x and y axis ticks and labels for aesthetics
+        ax[0,i].tick_params(
+            axis='x',          # changes apply to the x-axis
+            which='both',      # both major and minor ticks are affected
+            bottom=False,      # ticks along the bottom edge are off
+            top=False,         # ticks along the top edge are off
+            labelbottom=False)
+        ax[0,i].set_title(title, fontsize=fontsize)
+        ax[1,i].set_xlabel(r"$t$", fontsize=fontsize)
+        ax[0,i].set_xlim((0,t_final))
+        ax[1,i].set_xlim((0,t_final))
+        if i>0: #turning of y axis ticks and labels for the right two columns of plots
+            ax[1,i].tick_params(
+                axis='y',          # changes apply to the x-axis
+                which='both',      # both major and minor ticks are affected
+                left=False,      # ticks along the bottom edge are off
+                right=False)
+            ax[0,i].tick_params(
+                axis='y',          # changes apply to the x-axis
+                which='both',      # both major and minor ticks are affected
+                left=False,      # ticks along the bottom edge are off
+                right=False)
+
+    ax[0,0].set_ylabel(r"$\theta_n(t)$", fontsize=fontsize)
+    ax[0,0].tick_params(axis='y', labelsize=fontsize)
+    ax[1,0].tick_params(axis='y', labelsize=fontsize)
+    ax[1,0].set_ylabel(r"$\theta_{n,S}(t)$", fontsize=fontsize)
+    
+
+    # saving the composed figure as SVG and PNG
+    if save_dir is None:
+        save_dir = shift_matrix_obj.current_dir
+    svg_path=save_figure(fig, save_dir=save_dir, name=name+".svg")
+    png_path=os.path.join(save_dir,name+".png")
+    svg2png(url=svg_path,write_to=png_path,
+                parent_height=110,parent_width=400,output_height=115*4,output_width=400*4)
+    return svg_path
+
+
+def plot_noise(t_final, steps, noise, shift_matrix_obj:ShiftMatrix, name="noise", save_dir=None):
+    fig,ax=plt.subplots(1,1)
+    noise=noise[:-1]
+    ax.plot(np.arange(0, t_final,t_final/steps), noise)
+    noise_integrated = np.cumsum(noise)
+    ax.plot(np.arange(0, t_final,t_final/steps), noise_integrated)
+        
+    ax.set_xlabel(r"$t$")
+    ax.set_ylabel(r"power")
+    ax.set_title(name)
+
+    if save_dir is None:
+        save_dir = shift_matrix_obj.current_dir
+    svg_path=save_figure(fig, save_dir=save_dir, name=name+".svg")
+    png_path=os.path.join(save_dir,name+".png")
+    svg2png(url=svg_path,write_to=png_path,
+            parent_height=110,parent_width=400,output_height=115*4,output_width=400*4)
 
 
 # Example usage
