@@ -5,6 +5,7 @@ Utility functions for plotting
 
 
 from typing import Optional
+import black
 import matplotlib.pyplot as plt
 from matplotlib import colors
 from matplotlib.colors import ListedColormap, Normalize, LinearSegmentedColormap
@@ -23,7 +24,7 @@ import svgutils.transform as sg
 import svgutils.compose as sc
 from cairosvg import svg2png
 import dynamics
-import scipy.linalg as la
+import scipy
 
 
 
@@ -34,6 +35,7 @@ purple = np.array([205, 135, 222, 100])/256
 red = np.array([211, 95, 95, 100])/256
 orange = np.array([255, 153, 85, 100])/256
 green = np.array([44, 160, 90, 100])/256
+black = np.array([0, 0, 0, 100])/256
 
 
 
@@ -148,7 +150,7 @@ def save_figure(fig, save_dir: str, name: str) -> str:
         return save_path
 
 
-def add_pcolormesh(ax, matrix, color=blue, min_max=None, log=True, cutoff=1e-5, absolute=False):
+def add_pcolormesh(ax, matrix, color=blue, min_max=None, log=True, cutoff=1e-5, absolute=False, cmap=None):
     """
     Helper function to add a pcolormesh to an axis for consistent styling across all higher level functions.
 
@@ -188,8 +190,9 @@ def add_pcolormesh(ax, matrix, color=blue, min_max=None, log=True, cutoff=1e-5, 
         norm=Normalize(vmin=min_max[0], vmax=min_max[1], clip=True)
 
     # adding plot to axis
-    print("Shape of matrix:", np.shape(matrix))
-    im = ax.pcolormesh(np.flip(matrix,axis=0), cmap=create_cmap_from_white(color), norm=norm)
+    if cmap is None:
+        cmap=create_cmap_from_white(color)
+    im = ax.pcolormesh(np.flip(matrix,axis=0), cmap=cmap, norm=norm)
     ax.set_xticks([])
     ax.set_yticks([])
     for axis in ['top','bottom','left','right']:
@@ -320,7 +323,7 @@ def visualize_matrix(left_vec=None,
         return save_figure(fig, save_dir=save_dir, name=name if name is not None else "pcolormesh.svg")
 
 
-def shift_matrix_construction_visualization_subplots(shift_matrix_obj:ShiftMatrix, in_eigenspace=False, log=True, absolute=False, fs=8, cutoff=1e-4):
+def shift_matrix_construction_visualization_subplots(shift_matrix_obj:ShiftMatrix, in_eigenspace=False, log=True, absolute=False, fs=8, cutoff=1e-4, jac_color=darkblue):
     """
     Helper function to create the subplots for the composed figure visualizing the construction of the shift matrix by plotting the Jacobian, 
     the individual shift components, and everything layered on top of each other as individual SVGs. 
@@ -393,8 +396,8 @@ def shift_matrix_construction_visualization_subplots(shift_matrix_obj:ShiftMatri
     saving_paths=[]
 
     # Visualize jacobian in eigenspace and physical space
-    add_pcolormesh(axes_layered[1,1],jacobian, color=darkblue, log=log, absolute=absolute, cutoff=cutoff, min_max=min_max)
-    saving_paths.append(visualize_matrix(matrix=jacobian, label=r"$VJV^{-1}$" if in_eigenspace else r"$ J $", color=darkblue, log=log, absolute=absolute, fs=fs, cutoff=cutoff, name=f"{"eigenspace" if in_eigenspace else "physical"}_jacobian.svg", save_dir=save_dir, min_max=min_max) )
+    add_pcolormesh(axes_layered[1,1],jacobian, color=jac_color, log=log, absolute=absolute, cutoff=cutoff, min_max=min_max)
+    saving_paths.append(visualize_matrix(matrix=jacobian, label=r"$VJV^{-1}$" if in_eigenspace else r"$ J $", color=jac_color, log=log, absolute=absolute, fs=fs, cutoff=cutoff, name=f"{"eigenspace" if in_eigenspace else "physical"}_jacobian.svg", save_dir=save_dir, min_max=min_max) )
     
 
     # looping over individual shift matrices to visualize their construction one by one
@@ -436,7 +439,7 @@ def shift_matrix_construction_visualization_subplots(shift_matrix_obj:ShiftMatri
 
 
 
-def compose_shift_matrix_construction_visualization(shift_matrix_obj:ShiftMatrix, log=True, absolute=True,fs=8):
+def compose_shift_matrix_construction_visualization(shift_matrix_obj:ShiftMatrix, log=True, absolute=True,fs=8, jac_color=darkblue):
     """
     Compose a comprehensive visualization of the shift matrix construction process.
     This function generates a side-by-side comparison of the shift matrix construction
@@ -452,6 +455,8 @@ def compose_shift_matrix_construction_visualization(shift_matrix_obj:ShiftMatrix
         If True, display absolute values and log False, display absolute values on linear scale.
     fs : int, optional
         Font size for the plots. Default is 8.
+    jac_color : str, optional
+        Color for the Jacobian matrix visualization. Default is darkblue.
     -------
     save_dir : str
         Path to the saved combined SVG file (plots\\combined.svg).
@@ -459,8 +464,8 @@ def compose_shift_matrix_construction_visualization(shift_matrix_obj:ShiftMatrix
 
 
     # generate the subfigures based on the properties of shift_matrix_obj
-    file_paths_physical=shift_matrix_construction_visualization_subplots(shift_matrix_obj, in_eigenspace=False, log=log, absolute=absolute, fs=fs, cutoff=1e-4)
-    file_paths_eigenspace=shift_matrix_construction_visualization_subplots(shift_matrix_obj, in_eigenspace=True, log=log, absolute=absolute, fs=fs, cutoff=1e-4)
+    file_paths_physical=shift_matrix_construction_visualization_subplots(shift_matrix_obj, in_eigenspace=False, log=log, absolute=absolute, fs=fs, cutoff=1e-4, jac_color=jac_color)
+    file_paths_eigenspace=shift_matrix_construction_visualization_subplots(shift_matrix_obj, in_eigenspace=True, log=log, absolute=absolute, fs=fs, cutoff=1e-4, jac_color=jac_color)
     
     #create new SVG figure
     fig = sg.SVGFigure("17cm", "6.5cm")
@@ -666,7 +671,7 @@ def plot_dynamics_scenario(t_final: float, args, model: BaseModel, y_0=None, ste
     
     # looping over cases and plotting dynamics for each case in the respective subplot
     for i, (name, args) in enumerate(cases):
-        print("Plotting case: ", name)
+        print("Numerically integrating case:", name)
         y_0_case = y_0.copy()
         plot_dynamics(t_final, y_0_case, args,
                     axes=ax[i],
@@ -683,9 +688,268 @@ def plot_dynamics_scenario(t_final: float, args, model: BaseModel, y_0=None, ste
         return svg_path
     else:
         return ax
+    
+
+def plot_scenario_dynamics_split(t_final: float, args, model: BaseModel, nodes: list, y_0=None, steps=8000, meta_scenario_name="default",
+                    save_dir: Optional[str]=None, ax=None):
+    """
+    Generates two panels comparing the dynamics of the network with and without vtn for a given scenario.
+
+    If axes are provided, only the unshifted plot is drawn to axes[0] and the shifted plot
+    to axes[1]. If no perturbation is provided, only the offset transient comparison is created.
+    """
+
+    # unpacking arguments
+    instance = (model.model_ode, model.model_ode_args)
+    pert = args[0:2]
+    shift = args[2:4]
+
+    dim = np.shape(model.jacobian_matrix)[0]
+
+    # set y_0 to fixpoint wiht an offset if no perturbation is provided or perturbation_and_offset is True, unless y_0 is provided
+    if y_0 is None:
+        if model.fixed_point is None:
+            model.compute_fixed_point()
+        fixpoint = model.fixed_point
+        y_0 = np.zeros(model.ode_dimension)
+        y_0[:dim] = fixpoint
+
+    # creating figure if no axes have been provided for plotting
+    if ax is None:
+        fig,ax=plt.subplots(len(nodes),1,figsize=(3, 2), sharex=True)
+
+        # setting save_dir to current instance directory not provided as a parameter to save the generated figure
+        if save_dir is None:
+            if model.current_dir is None:
+                model.save_parameters()
+            save_dir=model.current_dir
+            save_dir=os.path.join(save_dir,"plots") 
+    else:
+        save_dir=None
+
+    # numerically integrating shifted and unshifted trajectories
+    t, ys = dynamics.integrate_f(t_final, y_0, instance+pert+(None,None), t_0=0, steps=steps)
+    t, ys_shifted = dynamics.integrate_f(t_final, y_0, instance+pert+shift, t_0=0, steps=steps)
+
+    # fix point deviation
+    ys[:len(y_0)] -= y_0[:, None]
+    ys_shifted[:len(y_0)] -= y_0[:, None]
+
+    filepath = os.path.join(shift[1][0].current_dir,meta_scenario_name)
+    np.savez(filepath, t=t, ys=ys, ys_shifted=ys_shifted)
+    traj = np.load(filepath+".npz", allow_pickle=True)
+    t_l=traj["t"]
+    ys_l=traj["ys"]
+    ys_shifted_l=traj["ys_shifted"]
+    if np.any(t_l != t) or np.any(ys!=ys_l) or np.any(ys_shifted_l != ys_shifted):
+        raise ValueError("Loaded trajectories don't equal saved trajectories!")
+
+    # min and max for consistent scaling across subplots
+    min_max= np.empty((2, len(nodes)))
+
+    # looping over nodes, plotting shifted and unshifted trajectory for each node into the respective subplot
+    for i, node in enumerate(nodes):
+        min= np.min(np.stack((ys[node, :], ys_shifted[node, :])))
+        max= np.max(np.stack((ys[node, :], ys_shifted[node, :])))
+        min_max[:, i] = (min,max)
+        ax[i].plot(t, ys[node, :], color=black, linewidth=0.5, label="unshifted")
+        ax[i].plot(t, ys_shifted[node, :], color=red, linewidth=0.5, label="shifted")
+        if i < len(nodes)-1:
+            ax[i].set_xticks([])
 
 
-def plot_scenario_comparison(t_final,
+    # saving figure if it was created in this function, otherwise just returning the axes for further use
+    if save_dir is not None:
+        print(save_dir)
+        svg_path=save_figure(fig, save_dir=save_dir, name=meta_scenario_name+"_dynamics.svg")
+        png_path=os.path.join(save_dir,meta_scenario_name+"_dynamics.png")
+        svg2png(url=svg_path,write_to=png_path,
+                parent_height=110,parent_width=400,output_height=115*4,output_width=400*4)
+        return svg_path
+    else:
+        return min_max
+    
+
+def plot_scenario(t_final: float, args, model: BaseModel, nodes: list, ax, y_0=None, steps=8000, meta_scenario_name="default",
+                    save_dir: Optional[str]=None, node_colors=None):
+    """
+    Plots for a given scenario the psd, perturbation trajectory and trajectories of the nodes w and w/o shift in a row of subplots. 
+    The psd is plotted in ax[0], the perturbation trajectory in ax[1] and the trajectories of the nodes w and w/o shift in ax[2] to ax[2+len(nodes)].
+    """
+
+    # unpacking
+    pert = args[0:2]
+    y_lims= np.empty((2, 2+len(nodes)))
+
+    # plotting hist of psd of perturbation into ax[0]
+    y_lims[:,0]=plot_scenario_psd(ax=ax[0], pert=pert, log=True)
+
+     # plotting trajectory of perturbation into ax[1]
+    y_lims[:,1]=plot_scenario_perturbation_trajectory(ax=ax[1], t_final=t_final, steps=steps, pert=pert)
+
+     # plotting trajectories of nodes w and w/o shift into ax[2] to ax[2+len(nodes)]
+    y_lims[:, 2:2+len(nodes)]=plot_scenario_dynamics_split(t_final, args, model, nodes, y_0=y_0, steps=steps, meta_scenario_name=meta_scenario_name,
+                                     ax=ax[2:2+len(nodes)])
+
+    return y_lims
+
+
+def plot_scenario_psd(ax, pert, f_min_max=(0.5, 3.5), log= True):
+    """
+    Generates a power spectrum density plot of the perturbation for a given scenario. 
+    """
+    # unpacking perturbation type and the corresponding arguments
+    perturbation_type=pert[0]
+    perturbation_args=pert[1]
+    min_max=np.array([0,0])
+
+    # checking for known perturbation types and plotting the corresponding psd into ax
+    if perturbation_type is None:
+        raise ValueError("No perturbation provided for scenario, cannot plot psd.")
+    
+    elif perturbation_type is dynamics.perturbation_from_psd:
+        noise_object=perturbation_args[0]
+        freqs = noise_object.freqs
+        psd= noise_object.psd
+        ax.plot(freqs, psd)
+        min_max=np.array([np.min(psd), np.max(psd)])
+        
+    elif perturbation_type is dynamics.sine_perturbation_single_node:
+        amplitude=perturbation_args[0]
+        frequency=perturbation_args[1]
+        freqs=np.array([frequency])
+        amps=np.array([amplitude])
+        ax.hist(freqs, amps, markersize=5)
+        ax.set_xlim(f_min_max)
+        min_max=np.array([0, amplitude*1.5])
+
+    if log:
+        ax.set_xscale("log")
+    
+    return min_max
+    
+
+
+def plot_scenario_perturbation_trajectory(ax, t_final, steps, pert):
+    """
+    Plots the trajectory of the perturbation over time for a given scenario into ax.
+    """
+    # generate time array
+    t = np.linspace(0, t_final, steps)
+
+    # unpacking perturbation type and the corresponding arguments
+    perturbation_func=pert[0]
+    perturbation_args=pert[1]
+    perturbed_node=perturbation_args[-1]
+
+    
+    # generating perturbation values from the time array
+    vals=perturbation_func(t, np.empty(perturbed_node+1), perturbation_args)[perturbed_node]
+
+    # plotting the perturbation trajectory into ax
+    ax.plot(t, vals)
+    return np.array([np.min(vals), np.max(vals)])
+
+
+def plot_scenario_comparison_split(t_final,
+                               model:sokm,
+                               shift_matrix_obj:ShiftMatrix,
+                               scenarios,
+                               nodes=[0,3,5],
+                               steps=8000,
+                               y_0=None,
+                               name="dynamics_comparison", 
+                               save_dir=None,
+                               fontsize=5,
+                               perturbed_node=1):
+
+
+    """
+    
+
+
+    Arguments:
+        scenarios: list of touples the tuples have the form (title, pert) where 
+            title: string
+                title of the scenario.
+            pert: tuple
+                of the form (perturbation, perturbation_args) that defines the perturbation for the scenario
+         """
+
+    # initializing figure
+    fig,ax=plt.subplots(2+len(nodes), len(scenarios),figsize=(7, 3), sharey="row", gridspec_kw=dict(hspace=0.1, wspace=0.1))
+    
+    # colorshemes
+    cmap=plt.cm.cividis.reversed()
+    node_colors = node_colors_from_perturbation_distance(perturbed_node, model, cmap=cmap)
+
+    # Construct shift arguments
+    shift_args = (shift_matrix_obj, model, None)
+    shift = (dynamics.jacobian_shift, shift_args)
+        
+    y_lims=np.empty((2, 2+len(nodes))) # for consistent scaling across subplots, storing min and max values of each subplot for each scenario to later set the same y limits for the respective subplots across scenarios
+    # looping over the scenarios to generate the corresponding plots
+    for i, (title, pert ) in enumerate(scenarios):
+        print(f"Generating plot for scenario: {title}")
+
+        # Call plot_dynamics_scenarios with these perturbation and shift arguments to plot the row comaptison for the scenario onto the existing axes
+        y_lims_dummy = plot_scenario(
+            t_final=t_final,
+            args=pert + shift,
+            nodes=nodes,
+            model=model,
+            y_0=y_0,
+            steps=steps,
+            meta_scenario_name=title,
+            ax=ax[:, i],
+            node_colors=node_colors
+        )
+
+        # updating y_lims if necessary
+        y_lims[0,:] = np.min(np.stack((y_lims[0,:], y_lims_dummy[0,:])), axis=0)
+        y_lims[1,:] = np.max(np.stack((y_lims[1,:], y_lims_dummy[1,:])), axis=0)
+
+        # managing x and y axis ticks and labels for aesthetics
+        ax[0,i].tick_params(
+            axis='x',          # changes apply to the x-axis
+            which='both',      # both major and minor ticks are affected
+            bottom=False,      # ticks along the bottom edge are off
+            top=False,         # ticks along the top edge are off
+            labelbottom=False)
+        ax[0,i].set_title(title, fontsize=fontsize)
+        ax[1,i].set_xlabel(r"$t$", fontsize=fontsize)
+        ax[0,i].set_xlim((0,t_final))
+        ax[1,i].set_xlim((0,t_final))
+        if i>0: #turning of y axis ticks and labels for the right two columns of plots
+            ax[1,i].tick_params(
+                axis='y',          # changes apply to the x-axis
+                which='both',      # both major and minor ticks are affected
+                left=False,      # ticks along the bottom edge are off
+                right=False)
+            ax[0,i].tick_params(
+                axis='y',          # changes apply to the x-axis
+                which='both',      # both major and minor ticks are affected
+                left=False,      # ticks along the bottom edge are off
+                right=False)
+
+    ax[0,0].set_ylabel(r"$\theta_n(t)$", fontsize=fontsize)
+    #ax[0,0].tick_params(axis='y', labelsize=fontsize)
+    #ax[1,0].tick_params(axis='y', labelsize=fontsize)
+    ax[1,0].set_ylabel(r"$\theta_{n,S}(t)$", fontsize=fontsize)
+    
+
+    # saving the composed figure as SVG and PNG
+    if save_dir is None:
+        save_dir = shift_matrix_obj.current_dir
+    svg_path=save_figure(fig, save_dir=save_dir, name=name+".svg")
+    png_path=os.path.join(save_dir,name+".png")
+    svg2png(url=svg_path,write_to=png_path,
+                parent_height=110,parent_width=400,output_height=115*4,output_width=400*4)
+    return svg_path
+
+
+
+def plot_scenario_comparison_bunched(t_final,
                                model:sokm,
                                shift_matrix_obj:ShiftMatrix,
                                scenarios,
@@ -709,10 +973,12 @@ def plot_scenario_comparison(t_final,
                 of the form (perturbation, perturbation_args) that defines the perturbation for the scenario
          """
 
+    # initializing figure
     fig,ax=plt.subplots(2, len(scenarios),figsize=(7, 3), sharey="row", gridspec_kw=dict(hspace=0.1, wspace=0.1))
     
-    
-    node_colors=node_colors_from_perturbation_distance(perturbed_node, model, cmap=plt.cm.cividis)
+    # colorshemes
+    cmap=plt.cm.cividis.reversed()
+    node_colors = node_colors_from_perturbation_distance(perturbed_node, model, cmap=cmap)
 
     # Construct shift arguments
     shift_args = (shift_matrix_obj, model, None)
@@ -759,8 +1025,8 @@ def plot_scenario_comparison(t_final,
                 right=False)
 
     ax[0,0].set_ylabel(r"$\theta_n(t)$", fontsize=fontsize)
-    ax[0,0].tick_params(axis='y', labelsize=fontsize)
-    ax[1,0].tick_params(axis='y', labelsize=fontsize)
+    #ax[0,0].tick_params(axis='y', labelsize=fontsize)
+    #ax[1,0].tick_params(axis='y', labelsize=fontsize)
     ax[1,0].set_ylabel(r"$\theta_{n,S}(t)$", fontsize=fontsize)
     
 
@@ -774,17 +1040,80 @@ def plot_scenario_comparison(t_final,
     return svg_path
 
 
-def plot_noise(t_final, steps, noise, shift_matrix_obj:ShiftMatrix, name="noise", save_dir=None):
-    fig,ax=plt.subplots(1,1)
-    noise=noise[:-1]
-    ax.plot(np.arange(0, t_final,t_final/steps), noise)
-    noise_integrated = np.cumsum(noise)
-    ax.plot(np.arange(0, t_final,t_final/steps), noise_integrated)
-        
-    ax.set_xlabel(r"$t$")
-    ax.set_ylabel(r"power")
-    ax.set_title(name)
 
+
+def plot_noise(noise_object: dynamics.ContinuousSpectrumNoise, shift_matrix_obj:ShiftMatrix, axes=None, name="noise", save_dir=None):
+
+
+    if axes is None:
+        fig, ax = plt.subplots(1,1)
+    else:
+        ax = axes
+    times = np.arange(0, noise_object.t_max,noise_object.t_max/noise_object.steps)
+    noise = noise_object(times)
+    print("times", times)
+    print(type(noise), noise)
+    print("noise at some time", noise_object(times[0]))
+    print(noise_object.__dict__)
+    ax.plot(times, noise_object(times))
+
+    if axes is None:   
+        noise_integrated = np.cumsum(noise)
+        ax.plot(times, noise_integrated)
+        ax.set_xlabel(r"$t$")
+        ax.set_ylabel(r"power")
+        ax.set_title(name)
+        plt.show()
+
+        if save_dir is None:
+            save_dir = shift_matrix_obj.current_dir
+        svg_path=save_figure(fig, save_dir=save_dir, name=name+".svg")
+        png_path=os.path.join(save_dir,name+".png")
+        svg2png(url=svg_path,write_to=png_path,
+                parent_height=110,parent_width=400,output_height=115*4,output_width=400*4)
+
+
+def plot_angles_between_eigenvectors(matrix, ax, name="angles_between_eigenvectors", title="matrix", save_dir=None,fs=8):
+
+    # fetch eigenvectors
+    eigenValues, eigenVectors = np.linalg.eig(matrix)
+
+    idx = eigenValues.argsort()[::-1]   
+    eigenValues = eigenValues[idx]
+    eigenVectors = eigenVectors[:,idx]
+
+    # calcualte angle matrix between eigenvectors
+    angle_matrix = np.empty((eigenVectors.shape[1], eigenVectors.shape[1]))
+    for i in range(eigenVectors.shape[1]):
+        for j in range(eigenVectors.shape[1]):
+            angle_matrix[i, j] = np.arccos(np.clip(np.dot(eigenVectors[:, i], eigenVectors[:, j]) /
+                                      (np.linalg.norm(eigenVectors[:, i]) * np.linalg.norm(eigenVectors[:, j])), -1.0, 1.0))
+            
+    # visualize angle matrix as pcolormesh
+
+    add_pcolormesh(ax, angle_matrix, cmap=plt.cm.Reds_r, min_max=(0, np.pi/2), log=False, cutoff=1e-5, absolute=True)
+    ax.set_title(title, fontsize=fs)
+
+    
+
+
+def angle_comparison(model: sokm, shift_matrix_obj: ShiftMatrix, name="angle_comparison", save_dir=None):
+
+    # initialize plot
+    fig, axes = plt.subplots(1, 2, figsize=(6, 3))
+
+    # angle plot prior to shift
+    plot_angles_between_eigenvectors(model.jacobian_matrix, ax=axes[0], title="w/o shift")
+
+    # angle plot after shift
+    plot_angles_between_eigenvectors(model.jacobian_matrix+shift_matrix_obj.shift_matrix, ax=axes[1], title="with shift")
+
+    # add colorbar
+    cbar_ax = fig.add_axes((0.95, 0.11, 0.05, 0.77))
+    cbar=fig.colorbar(axes[1].collections[0], cax=cbar_ax)
+    cbar.outline.set_linewidth(0.5)
+
+    # save figure
     if save_dir is None:
         save_dir = shift_matrix_obj.current_dir
     svg_path=save_figure(fig, save_dir=save_dir, name=name+".svg")
@@ -792,6 +1121,175 @@ def plot_noise(t_final, steps, noise, shift_matrix_obj:ShiftMatrix, name="noise"
     svg2png(url=svg_path,write_to=png_path,
             parent_height=110,parent_width=400,output_height=115*4,output_width=400*4)
 
+
+#----------------------
+# plotting utils for publication figure on dynamics
+
+
+def plot_scenario_row(t_final, args, model, y_0, axes, nodes=[2,3], steps=8000, meta_scenario_name="scenario",overwrite=False, freqs_lims=(0.5, 3.5)):
+    """
+    Generates scenario data if it can't be loaded. Then adds shift power, power spectral density and selected trajectories to the provided axes. 
+    
+    """
+
+    # load data if path provided, else generate anew
+    traj=generate_or_fetch_scenario_data(t_final, args, model, y_0=y_0, steps=steps, meta_scenario_name=meta_scenario_name, overwrite=overwrite)
+
+    # plot psd histogram of response with illustrated shifts
+    freqs, psd = compute_psd_from_traj(traj["t"], traj["ys"][:np.shape(model.jacobian_matrix)[0], :])
+    psd=np.mean(psd, axis=0)
+    freqs_vtn, psd_vtn = compute_psd_from_traj(traj["t"], traj["ys_shifted"][:np.shape(model.jacobian_matrix)[0], :])
+    psd_vtn=np.mean(psd_vtn, axis=0)
+    plot_psd(axes[3],freqs,psd,freqs_vtn=freqs_vtn,psd_vtn=psd_vtn,freqs_lims=freqs_lims)
+
+    # plot shift powers over time
+    axes[0]= plot_vtn_powers(axes[0],traj, args[3][0],model)
+
+    # plot dynamics of selected nodes
+    plot_trajectories_split(traj, axes=axes[1:1+len(nodes)], nodes=nodes, y_0=y_0)
+    return axes
+
+
+def compute_psd_from_traj(t, vals):
+    """
+    Computes the power spectral density from a trajectory using scipy.signal.welch.
+    """
+
+    freqs, psd = scipy.signal.welch(vals, fs=1/(t[1]-t[0]), axis=-1, nperseg=len(t))
+    return freqs, psd
+
+def plot_trajectories_split(traj, axes, nodes, y_0=None):
+
+    t=traj["t"]
+    ys=traj["ys"]
+    ys_shifted=traj["ys_shifted"]
+
+    if y_0 is not None:
+        ys[:len(y_0)] -= y_0[:, None]
+        ys_shifted[:len(y_0)] -= y_0[:, None]
+
+     # min and max for consistent scaling across subplots
+    for i, node in enumerate(nodes):
+        min= np.min(np.stack((ys[node, :], ys_shifted[node, :])))
+        max= np.max(np.stack((ys[node, :], ys_shifted[node, :])))
+        if i==0:
+            min_max= np.array([min,max])
+        else:
+            if min<min_max[0]:
+                min_max[0]=min
+            if max>min_max[1]:
+                min_max[1]=max
+        axes[i].plot(t, ys[node, :], color=black, linewidth=0.5, label="unshifted")
+        axes[i].plot(t, ys_shifted[node, :], color=red, linewidth=0.5, label="shifted")
+        if i < len(nodes)-1:
+            axes[i].set_xticks([])
+    return min_max
+
+
+def generate_or_fetch_scenario_data(t_final: float, args, model: BaseModel, y_0=None, steps=8000, meta_scenario_name="default",
+                    save_dir: Optional[str]=None, overwrite=False):
+
+    """
+    Checks if the trajectory data of the scenario (w and w/o) VTN already exists. If so it is loaded. Else generated and saved. 
+    """
+
+    # unpacking arguments
+    instance = (model.model_ode, model.model_ode_args)
+    pert = args[0:2]
+    shift = args[2:4]
+
+    # checking if data already exists
+    if save_dir == None:
+        save_dir=shift[1][0].current_dir
+    filepath = os.path.join(save_dir,meta_scenario_name)+".npz"
+
+    if overwrite is False and os.path.isfile(filepath):
+        traj = np.load(filepath, allow_pickle=True)
+        return traj
+    
+    dim = np.shape(model.jacobian_matrix)[0]
+
+    # set y_0 to fixpoint if not provided
+    if y_0 is None:
+        if model.fixed_point is None:
+            model.compute_fixed_point()
+        fixpoint = model.fixed_point
+        y_0 = np.zeros(model.ode_dimension)
+        y_0[:dim] = fixpoint
+
+    # numerically integrating shifted and unshifted trajectories
+    t, ys = dynamics.integrate_f(t_final, y_0, instance+pert+(None,None), t_0=0, steps=steps)
+    t, ys_shifted = dynamics.integrate_f(t_final, y_0, instance+pert+shift, t_0=0, steps=steps)
+    #plt.plot(t,ys_shifted)
+    #plt.show()
+    if False:
+        # fix point deviation
+        ys[:len(y_0)] -= y_0[:, None]
+        ys_shifted[:len(y_0)] -= y_0[:, None]
+    
+    np.savez(filepath, t=t, ys=ys, ys_shifted=ys_shifted)
+    
+    return np.load(filepath, allow_pickle=True)
+
+
+def plot_psd(axes,freqs,psd,freqs_vtn=None,psd_vtn=None,vlines=None,freqs_lims=None):
+    """
+    Plots a histogram for the provided power spectral density. If psd_vtn is provided it is layered on top.
+    """
+
+    # plotting psd hist
+    axes.plot(freqs, psd, color="grey",alpha=0.8)
+    #axes.hist(psd, bins=freqs, color="grey", alpha=0.8)
+    
+    # plotting psd_vtn if provided
+    if np.any(psd_vtn!=None) and np.any(freqs_vtn!=None):
+        axes.plot(freqs_vtn, psd_vtn, color=darkblue, alpha=0.8)
+    
+    if freqs_lims is not None:
+        #print("not setting freqs lims")
+        axes.set_xlim(freqs_lims)
+    #axes.set_xscale("log")
+    axes.set_ylim(bottom=1e-8)
+    axes.set_yscale("log")
+    axes.set_xlabel(r"$\omega/2\pi$ [Hz]")
+
+    
+def plot_vtn_powers(axes, traj, shift_matrix_obj:ShiftMatrix, model: sokm, threshhold= 1e-8, absolute=False):
+    """
+    calculates the shift power of the nodes with battery energy storage systems
+    """
+
+    # fetching indices nodes where powers are applied based on the shift matrix
+    vtn_nodes= np.nonzero(np.any(shift_matrix_obj.shift_matrix > threshhold, axis=1))[0]
+
+    # fetching trajectory data and fixpoint values
+    t=traj["t"]
+    y_fixpoint=model.compute_fixed_point()
+    ys_shifted=traj["ys_shifted"][:len(y_fixpoint),:]
+
+    # compute shift power from that
+    p_vtn= (shift_matrix_obj.shift_matrix@(ys_shifted-y_fixpoint[:,None]))[vtn_nodes,:]
+    p_vtn_average= np.cumsum(p_vtn,axis=1)[:,1:]/t[None,1:] #skipping first entry in order to avoid division by zero
+
+    if absolute:
+        p_vtn_average=np.abs(p_vtn_average)
+    # bess colors
+    colors=["orange", "blue","green","red","darkblue"]
+
+    # plot
+    for bess_index in range(len(vtn_nodes)):
+        #axes.plot(t,p_vtn[bess_index], color=colors[bess_index],linewidth=0.5)
+        axes.plot(t[1:],p_vtn_average[bess_index],color=colors[bess_index],linewidth=0.5)
+        #plt.plot(t,p_vtn[bess_index], color=colors[bess_index])
+        #plt.plot(t[1:],p_vtn_average[bess_index], linestyle="--",color=colors[bess_index])
+        #plt.show()
+    if absolute:
+        axes.set_yscale("log")
+    axes.set_xlabel(r"$t $ [s]")
+    axes.set_ylabel(r"$\overline{P}_{VTN}$")
+    
+    return axes
+        
 
 # Example usage
 if __name__ == "__main__":

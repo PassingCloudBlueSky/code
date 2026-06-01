@@ -13,6 +13,7 @@ import numpy as np
 from scipy.integrate import solve_ivp
 from scipy.integrate import ode
 import matplotlib.pyplot as plt
+import os
 
 
 """ 
@@ -21,84 +22,181 @@ Perturbation functions:
 """
 
 
+if False:
+    def sine_perturbation_single_node(t,y,args):
+        """
+        Example perturbation function that computes a sine perturbation based on the current time and state vector.
 
-def sine_perturbation_single_node(t,y,args):
-    """
-    Example perturbation function that computes a sine perturbation based on the current time and state vector.
+        Parameters:
+        -------
+        t: float
+            Current time.
+        y: array-like
+            Current state vector.
+        args: tuple
+            Tuple of the shape (amplitude, frequency) where:
+            - amplitude: float
+                The amplitude of the cosine perturbation.
+            - frequency: float
+                The frequency of the cosine perturbation.
+            - node_index: int
+                The index of the state variable to which the perturbation should be applied.
 
-    Parameters:
-    -------
-    t: float
-        Current time.
-    y: array-like
-        Current state vector.
-    args: tuple
-        Tuple of the shape (amplitude, frequency) where:
-        - amplitude: float
-            The amplitude of the cosine perturbation.
-        - frequency: float
-            The frequency of the cosine perturbation.
-        - node_index: int
-            The index of the state variable to which the perturbation should be applied.
+        Returns:
+        -------
+        perturbation_value: array-like
+            The computed cosine perturbation value based on the current time applied to the specified node index in the state vector.
+        """
 
-    Returns:
-    -------
-    perturbation_value: array-like
-        The computed cosine perturbation value based on the current time applied to the specified node index in the state vector.
-    """
+        amplitude, frequency, node_index = args
 
-    amplitude, frequency, node_index = args
+        # Example perturbation: a simple cosine function of time with given amplitude and frequency
+        if np.isscalar(t):
+            perturbation_vector = np.zeros_like(y)
+            perturbation_vector[node_index] = amplitude * np.sin( frequency * t)
+        else:
+            perturbation_vector = np.zeros((len(y),len(t)))
+            perturbation_vector[node_index,:] = amplitude * np.sin( frequency * t)
+        # TODO: loop over node_indices if node_index is array of int
+        
 
-    # Example perturbation: a simple cosine function of time with given amplitude and frequency
-    perturbation_vector = np.zeros_like(y)
-    # TODO: loop over node_indices if node_index is array of int
-    perturbation_vector[node_index] = amplitude * np.sin( frequency * t)
+        return perturbation_vector
+
+
+    def perturbation_from_noise(t,y,args):
+
+        times , noise = args
+
+        current_index=np.searchsorted(times,t)
+        perturbation_vector = np.zeros_like(y)
+        perturbation_vector[:len(noise)]=noise[current_index]
+
+        return perturbation_vector
+
+
+
+    def spectrum_noise(spectrum_func, func_params, max_val=0.05, steps=1024, samples_per_step=10, rate=1.):
+        """
+        Generates noise based on a given spectrum function. 
+        The spectrum function should take an array of frequencies as input 
+        and return the corresponding power spectral density values.
+        Parameters:
+        -------------
+        spectrum_func: function
+            A function that takes an array of frequencies and returns the corresponding power spectral density values.
+        max_val: float
+            The maximum amplitude of the generated noise.
+        steps: int
+            The number of steps to generate.
+        samples_per_step: int
+            The number of samples per step.
+        rate: float
+            The sampling rate (samples per unit time). So the total time duration t_max=samples/rate.
+        """
+        steps +=1 # to ensure we have the correct number of samples after inverse FFT
+        samples=steps*samples_per_step
+        freqs = np.fft.rfftfreq(samples, 1.0/rate)
+        psd = spectrum_func(freqs, **func_params)
+        amplitudes = np.sqrt(psd)
+        phases = np.exp(2j * np.pi * np.random.rand(len(freqs)))
+        spectrum = amplitudes * phases
+        noise = np.fft.irfft(spectrum, samples)[np.arange(steps)*samples_per_step]
+        integrated_noise = np.cumsum(noise)
+        #scaling = max_val/np.max(np.abs(integrated_noise))  # Normalize the integrated noise to the desired maximum amplitude to counteract random walk
+        scaling = max_val/np.max(np.abs(noise)) 
+        return freqs, psd * scaling, (noise - integrated_noise[-1]/len(integrated_noise))* scaling
+
+
+class ContinuousSpectrumNoise: 
+    def __init__(self, spectrum_func, func_params, max_val=0.05, steps=1024, samples_per_step=1, rate=1., perturbed_node=0):
+        """
+        Continuous noise generator using sum-of-sinusoids.
+        """
+        self.steps = steps + 1
+        self.samples = self.steps * samples_per_step
+        self.rate = rate
+        self.t_max = self.steps / rate
+        self.freqs = np.fft.rfftfreq(self.samples, 1.0 / rate)
+        self.psd = spectrum_func(self.freqs, **func_params)
+        self.amps = np.sqrt(self.psd)
+        self.phases = 2 * np.pi * np.random.rand(len(self.freqs))
+        self.perturbed_node= perturbed_node
+
+        # Scaling the based on a sample of the resulting noise in order to match the provided max_val
+        test_t = np.linspace(0, self.t_max, self.samples)
+        test_noise = self._sum_of_sinusoids(test_t)
+        scaling = max_val / np.max(np.abs(test_noise))
+        self.psd*=scaling**2
+        self.amps *= scaling
+
+        # throw away all frequencies out whose amps value is below a certain threshold to speed up the noise generation while keeping the same max_val
+        # e.g. 1e-2 of the max amp value
+        amp_threshold = 1e-2 * np.max(self.amps)
+        self.amps[self.amps < amp_threshold] = 0
+        self.psd[self.psd < amp_threshold**2] = 0
+
+    def _sum_of_sinusoids(self, t):
+        # Broadcasting: shape (len(freqs), len(t))
+        return np.sum(
+            self.amps[:, None] * np.cos(2 * np.pi * self.freqs[:, None] * t [None,:]+ self.phases[:, None]),
+            axis=0
+        )
+
+    def __call__(self, t):
+        t = np.atleast_1d(t)
+        noise = self._sum_of_sinusoids(t)
+        # Remove DC drift (mean subtraction)
+        # noise -= np.mean(noise)
+
+        return noise if len(noise) > 1 else noise[0]
+
+    def save(self, file_directory, name="noise_obj.npz"):
+        """Save the noise generator instance to a file."""
+        filepath = os.path.join(file_directory,name)
+        np.savez(
+            filepath,
+            rate=self.rate,
+            steps=self.steps,
+            samples=self.samples,
+            t_max=self.t_max,
+            freqs=self.freqs,
+            psd=self.psd,
+            amps=self.amps,
+            phases=self.phases,
+            perturbed_node=self.perturbed_node,
+        )
+        return filepath
+
+    @classmethod
+    def from_file(cls, filepath):
+        """Load a ContinuousSpectrumNoise generator from a saved file."""
+        data = np.load(filepath, allow_pickle=True)
+        obj = cls.__new__(cls)
+        obj.rate = float(data["rate"])
+        obj.steps = int(data["steps"])
+        obj.samples = int(data["samples"])
+        obj.t_max = float(data["t_max"])
+        obj.freqs = data["freqs"]
+        obj.psd = data["psd"]
+        obj.amps = data["amps"]
+        obj.phases = data["phases"]
+        obj.perturbed_node = int(data["perturbed_node"])
+        return obj
+
+
+def perturbation_from_psd(t,y,args):
+
+    noise_object, noise_index = args
+
+    noise=noise_object(t)
+    if np.isscalar(t):
+        perturbation_vector = np.zeros_like(y)
+    else:
+        perturbation_vector = np.zeros((len(y),len(t)))
+    perturbation_vector[noise_index]=noise
 
     return perturbation_vector
 
-
-def perturbation_from_noise(t,y,args):
-
-    times , noise = args
-
-    current_index=np.searchsorted(times,t)
-    perturbation_vector = np.zeros_like(y)
-    perturbation_vector[:len(noise)]=noise[current_index]
-
-    return perturbation_vector
-
-
-
-def spectrum_noise(spectrum_func, func_params, max_val=0.05, steps=1024, samples_per_step=10, rate=1.):
-    """
-    Generates noise based on a given spectrum function. 
-    The spectrum function should take an array of frequencies as input 
-    and return the corresponding power spectral density values.
-    Parameters:
-    -------------
-    spectrum_func: function
-        A function that takes an array of frequencies and returns the corresponding power spectral density values.
-    max_val: float
-        The maximum amplitude of the generated noise.
-    steps: int
-        The number of steps to generate.
-    samples_per_step: int
-        The number of samples per step.
-    rate: float
-        The sampling rate (samples per unit time). So the total time duration t_max=samples/rate.
-    """
-    steps +=1 # to ensure we have the correct number of samples after inverse FFT
-    samples=steps*samples_per_step
-    freqs = np.fft.rfftfreq(samples, 1.0/rate)
-    psd = spectrum_func(freqs, **func_params)
-    amplitudes = np.sqrt(psd)
-    phases = np.exp(2j * np.pi * np.random.rand(len(freqs)))
-    spectrum = amplitudes * phases
-    noise = np.fft.irfft(spectrum, samples)[np.arange(steps)*samples_per_step]
-    integrated_noise = np.cumsum(noise)
-    #scaling = max_val/np.max(np.abs(integrated_noise))  # Normalize the integrated noise to the desired maximum amplitude to counteract random walk
-    scaling = max_val/np.max(np.abs(noise)) 
-    return freqs, psd * scaling, (noise - integrated_noise[-1]/len(integrated_noise))* scaling
 
 
 def exp_decay_spectrum(freqs, max_ampl=1.0, cutoff=100):
@@ -129,15 +227,23 @@ def white_spectrum(freqs, max_ampl=1.0, freq_min=0, freq_max=np.inf):
     psd[ freqs>freq_max] = 0
     return psd
 
-def realistic_spectrum(freqs, min=0.5,cutoff=6):
+def realistic_spectrum(freqs, min=0.05,cutoff=6):
     """
     Example spectrum function that generates a more realistic spectrum by combining an exponentially decaying spectrum with a Gaussian peak.
     """
     psd = np.zeros_like(freqs)
-    psd [freqs<cutoff]= freqs[freqs<cutoff]**(-5/3)
+    psd [freqs<cutoff]= freqs[freqs<cutoff]**(-5/3) 
     psd [freqs<min] = 0
-    plt.plot(freqs[freqs<cutoff]*2*np.pi, psd[freqs<cutoff])
-    plt.show()
+    #plt.plot(freqs[freqs<cutoff]*2*np.pi, psd[freqs<cutoff])
+    #plt.show()
+    return psd
+
+def realistic_spectrum_with_peak(freqs, min=0.05,cutoff=6, center=0.5, width=0.1):
+    """
+    Example spectrum function that generates a more realistic spectrum by combining an exponentially decaying spectrum with a Gaussian peak.
+    """
+    psd = realistic_spectrum(freqs, min=min, cutoff=cutoff)*0.0001
+    psd += gaussian_spectrum(freqs, max_ampl=0.1, center=center, width=width)
     return psd
 
 """
@@ -290,12 +396,11 @@ def integrate_f(t_final,y_0,args,t_0=0.,steps=8000):
     times=np.zeros(steps+1)
     y_vals=np.zeros((len(y_0),steps+1))
     y_vals[:,0]=y_0
-
     step=0
     while integrator.successful() and step<steps:
         step+=1
         times[step]=integrator.t+dt
-        print("At time {}/{}".format(np.round(times[step],decimals=1),t_final)+" "*10,end="\r")
+        print("At time {}/{}".format(np.round(times[step],decimals=1),t_final)+" "*10, end="\r")
         y_vals[:,step]=integrator.integrate(integrator.t+dt)
     return times, y_vals
 

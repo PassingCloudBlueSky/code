@@ -52,7 +52,7 @@ class ShiftMatrix:
 
 
 
-    def save_to_file(self, path: str="") -> str:
+    def save_to_file(self, path: str="", zr=None, zc=None) -> str:
         """
         Save the ShiftMatrix object to a file in JSON format.
 
@@ -102,6 +102,16 @@ class ShiftMatrix:
         }
 
         # Save to file
+        folder_name = "eigvals_"
+        for index in self.eigenvalue_indices:
+            folder_name += f"{index}_"
+        folder_name += "shifts_"
+        for shift in self.shifts:
+            folder_name += f"{shift}_"
+        if zr is not None and zc is not None:
+            folder_name += f"{len(zr)}rows_{len(zc)}cols"
+        self.current_dir = os.path.join(self.current_dir,folder_name)
+        os.makedirs(self.current_dir, exist_ok=True)
         if path == "":
             path = os.path.join(self.current_dir, "shift_matrix.json")
             print(f"Saving shift matrix data to {path}...")
@@ -222,7 +232,7 @@ class ShiftMatrix:
 
         self.Xs = Xs
         self.Ys = Ys
-        print("Generated Xs {Xs} and Ys {Ys}.".format(Xs=Xs, Ys=Ys))
+        #print("Generated Xs {Xs} and Ys {Ys}.".format(Xs=Xs, Ys=Ys))
         return Xs,Ys
 
 
@@ -395,7 +405,9 @@ class ShiftMatrix:
         self.generate_index_sets(eigenvalue_indices, len(zero_rows), len(zero_cols))
         self.calculate_coefficients_one_side(shifts, zero_rows, right=False)
         self.calculate_coefficients_one_side(shifts, zero_cols, right=True)
-        return self.construct_shift_matrix()
+        self.construct_shift_matrix()
+        self.save_to_file(zr=zero_rows,zc=zero_cols)
+        return self.shift_matrix
 
 
 
