@@ -13,7 +13,7 @@ plt.rcParams['text.latex.preamble'] = r'\\usepackage{amsmath}'  # Optional: Add 
 
 import numpy as np
 from kuramoto_class import SecondOrderKuramotoModel as sokm 
-from shift_matrix import ShiftMatrix
+from shift_matrix import *
 import networkx as nx
 import os
 import svgutils.transform as sg
@@ -340,14 +340,15 @@ def plot_network(
     )
 
     # Annotate nodes with their numbers
-    nx.draw_networkx_labels(
-        G,
-        pos,
-        labels={node: str(node+1) for node in G.nodes()},  # Label each node with its number
-        font_size=fs,
-        font_color="black",
-        ax=ax,
-    )
+    if model.connectivity_matrix.shape[0] <= 10:  # Only add labels if there are 20 or fewer nodes for readability
+        nx.draw_networkx_labels(
+            G,
+            pos,
+            labels={node: str(node+1) for node in G.nodes()},  # Label each node with its number
+            font_size=fs,
+            font_color="black",
+            ax=ax,
+        )
 
     """
     # highlighting the perturbing node
@@ -708,7 +709,8 @@ def plot_dynamics_evaluation(t_final,
                                noise_type="white",
                                frequency_samples=400,
                                nodes=[0,3],
-                               overwrite=False):
+                               overwrite=False,
+                               alpha=1.):
     """
     Creates a publication ready plot comparing two different VTN setup fro the same BESS setup based on BESS powers (as a func of time and averaged), 
     individual node trajectories, power spectral density of the response. The trajectories and PSD are inside the subplot compared to the response without VTN.
@@ -721,13 +723,14 @@ def plot_dynamics_evaluation(t_final,
         y_0[:model.jacobian_matrix.shape[0]] = model.compute_fixed_point()
 
     # generate scenarios:
-    scenarios=generate_scenarios(model, noise_type=noise_type, perturbation_strength=perturbation_strength, frequency_samples=frequency_samples,steps=steps)
+    scenarios=generate_scenarios(model, noise_type=noise_type, perturbation_strength=perturbation_strength, frequency_samples=frequency_samples,steps=steps,overwrite=overwrite) if not load_scenarios else load_scenarios
 
     # create the axes for the figure
     ONE_MM = 1 / 25.4  # Convert mm to inches
     fig = plt.figure(figsize=(85*ONE_MM*2,70*ONE_MM))
     w=6
     h=2
+    
     grid=(3*h,3*w)
     ax_network=plt.subplot2grid(grid, (0,0), rowspan=h, colspan=2*w, fig=fig)
     ax_psd=plt.subplot2grid(grid, (0,2*w), rowspan=h, colspan=w, fig=fig)
@@ -742,6 +745,7 @@ def plot_dynamics_evaluation(t_final,
 
     
     # plot  network
+    shift_matrix_obj= scenarios[0][3][0]
     plot_network( model, shift_matrix_obj=shift_matrix_obj, axes=ax_network, seed=4, name="network_VTN.SVG",  perturbed_node=perturbed_node, node_colors="black" )
 
     # calculate vline location of resonances shifted w and w/o VTN
@@ -755,22 +759,42 @@ def plot_dynamics_evaluation(t_final,
     noise_psd=noise_psd[filter]
     freqs_lims=(freqs[0], freqs[-1])
     print("freqs_lims:", freqs_lims)
-    plot_psd(ax_psd,freqs,noise_psd,freqs_vtn=None,psd_vtn=None,vlines=None,freqs_lims=freqs_lims)
+    min_max_psd = plot_psd(ax_psd,freqs,noise_psd,freqs_vtn=None,psd_vtn=None,freqs_lims=freqs_lims)
 
     # as a separate function: plot scenario row (generate data or not based on load_scenarios parameter)
     for i,scenario in enumerate(scenarios):
-        plot_scenario_row(t_final, scenario, model, y_0, scenario_axes[f"ax_row{i+1}"], nodes=nodes, steps=steps, meta_scenario_name=f"scenario{i+1}",overwrite=overwrite,freqs_lims=freqs_lims)
-        
+        psd_vlines, psd_vline_colors = v_line_locations_from_shift(model, scenario[3][0])
+        min_max_psd = plot_scenario_row(t_final, 
+                                        scenario, 
+                                        model, 
+                                        y_0, 
+                                        scenario_axes[f"ax_row{i+1}"], 
+                                        nodes=nodes, 
+                                        steps=steps, 
+                                        meta_scenario_name=f"scenario{i+1}",
+                                        overwrite=overwrite,
+                                        freqs_lims=freqs_lims, 
+                                        min_max_psd=min_max_psd,
+                                        psd_vlines= psd_vlines,
+                                        psd_vline_colors=psd_vline_colors,
+                                        alpha=alpha)
+    
+    min_max_psd[0] = max(min_max_psd[0],1e-8)
+    ax_psd.set_ylim(min_max_psd)
+    for i in range(1,len(scenarios)+1):
+        scenario_axes[f"ax_row{i}"][3].set_ylim(min_max_psd)
+    
+
     if save_dir is None:
         save_dir = model.current_dir
-    svg_path=save_figure(fig, save_dir=save_dir, name=name+".svg")
-    png_path=os.path.join(save_dir,name+".png")
+    svg_path=save_figure(fig, save_dir=save_dir, name=name+"_tfinal"+str(t_final)+".svg")
+    png_path=os.path.join(save_dir,name+"_tfinal"+str(t_final)+".png")
     svg2png(url=svg_path,write_to=png_path,
                 parent_height=110,parent_width=400,output_height=115*4,output_width=400*4)
     return svg_path
 
 
-def generate_scenarios(model:sokm, noise_type="realistic", perturbation_strength=0.1, frequency_samples=400 , steps=8000):
+def generate_scenarios(model:sokm, noise_type="realistic", perturbation_strength=0.1, frequency_samples=400 , steps=8000, overwrite=True):
     """
     A helper function to generate the the scenarios for handling in plot dynamics evaluation and ultimately dynamics.integrate_f.
     THe hardcoded scenarios are:
@@ -793,26 +817,30 @@ def generate_scenarios(model:sokm, noise_type="realistic", perturbation_strength
     print(f"Time scale of largest eigenvalue is {1/np.max(all_orig_freqs)} while the time step size is {t_final/steps}. Consider adjusting these parameters if the time step size is not significantly smaller than the time scale of the largest eigenvalue for a more accurate representation of the dynamics.")
 
 
-    # setting vtn parameters
-    zero_rows = np.array([5,6,7],dtype=int)
-    zero_cols = np.array([],dtype=int)
-
-    # generate shift matrices
-    eigenvalue_indices_a = [ 2,3]
-    shifts_a = np.array([-0.3,0.3],dtype=float)
     shift_matrix_obj_a = ShiftMatrix(model=model)
+    shift_matrix_obj_b = ShiftMatrix(model=model)
+
+    # setting vtn parameters and calculating rudimentary ideal vtn node locations for the given shifts and vtn size
+    #zero_rows = np.array([5,6,7],dtype=int)
+    num_vtn_nodes = 3
+    zero_cols = np.array([],dtype=int)
+    eigenvalue_indices_a = [ 2,3]
+    shifts_a = np.array([-0.6,0.3],dtype=float)
+    eigenvalue_indices_b = [ 5]
+    shifts_b = np.array([-0.5],dtype=float)
+    zero_rows = shift_matrix_obj_a.ideal_zero_rows(num_vtn_nodes, eigenvalue_indices_a+eigenvalue_indices_b) 
+
+    # generate shift matrices    
     shift_matrix_obj_a.construct_from_scratch(eigenvalue_indices_a, shifts_a, zero_rows, zero_cols)
     shift_args_a = (shift_matrix_obj_a, model, None)
     shift_a = (dynamics.jacobian_shift, shift_args_a)
-    compose_shift_matrix_construction_visualization(shift_matrix_obj_a, log=True, absolute=True,fs=10, jac_color=darkblue)
+    compose_shift_matrix_construction_visualization(shift_matrix_obj_a, log=True, absolute=True,fs=10, jac_color=darkblue,overwrite=overwrite)
 
-    eigenvalue_indices_b = [ 5]
-    shifts_b = np.array([-0.5],dtype=float)
-    shift_matrix_obj_b = ShiftMatrix(model=model)
+    
     shift_matrix_obj_b.construct_from_scratch(eigenvalue_indices_b, shifts_b, zero_rows, zero_cols)
     shift_args_b = (shift_matrix_obj_b, model, None)
     shift_b = (dynamics.jacobian_shift, shift_args_b)
-    compose_shift_matrix_construction_visualization(shift_matrix_obj_b, log=True, absolute=True,fs=10, jac_color=darkblue)
+    compose_shift_matrix_construction_visualization(shift_matrix_obj_b, log=True, absolute=True,fs=10, jac_color=darkblue,overwrite=overwrite)
     
     #all_orig_freqs = all_orig_freqs[np.invert(np.isnan(all_orig_freqs))]
     #prior_shift_freqs=all_orig_freqs[shift_matrix_obj.eigenvalue_indices]
@@ -847,21 +875,56 @@ def generate_scenarios(model:sokm, noise_type="realistic", perturbation_strength
     return [pert+shift_a,pert+shift_b]
 
 
+def v_line_locations_from_shift(model:sokm, shift_matrix_obj:ShiftMatrix):
+    """
+    Calculates the frequencies of shifting eigenvalues prior and post shift for annotation in psd_plots.
+    Theoretical post shift frequencies are verified with the existence of an actual resonance frequency in 1e-8 proximity to the predicted shifted resonance frequency. 
+
+    Parameters
+    ----------
+    model : sokm
+        The network model containing the second order Kuramoto model Jacobian and system dynamics.
+    shift_matrix_obj : ShiftMatrix
+        ShiftMatrix instance containing eigenvalue shifts applied to the model.
+
+    Returns
+    -------
+    tuple of arrays
+        Tuple containing three arrays: (frequencies_prior, frequencies_post_theo, frequencies_post_actual), 
+        - frequencies_prior are the resonance frequencies corresponding to the eigenvalues that are shifted, 
+        - frequencies_post_theo are the predicted resonance frequencies after applying the shift based on the shift matrix
+        - frequencies_post_actual are the actual resonance frequencies of the model after applying the shift
+    """
+
+    frequencies_prior= model.predict_resonance_frequencies(indices=shift_matrix_obj.eigenvalue_indices)
+
+    frequencies_post_actual=model.predict_resonance_frequencies(S=shift_matrix_obj.shift_matrix, indices=shift_matrix_obj.eigenvalue_indices) 
+
+    shifted_eigvals=shift_matrix_obj.eigenvalues[shift_matrix_obj.eigenvalue_indices]+shift_matrix_obj.shifts
+    frequencies_post_theo=model.predict_resonance_frequencies(shifted_eigvals=shifted_eigvals)
+    rel_diffs = np.abs(frequencies_post_theo - frequencies_post_actual) / np.abs(frequencies_post_actual)
+
+    print("Maximum relative difference between predicted post shift frequencies and actual post shift frequencies: ", np.max(rel_diffs)*100, " %.")
+    pre_color=np.empty_like(frequencies_prior, dtype=object)
+    pre_color.fill("black")
+    post_color=np.empty_like(frequencies_post_theo, dtype=object)
+    post_color.fill(darkblue)
 
 
-   
+    return np.concatenate([frequencies_prior, frequencies_post_theo]), np.concatenate([pre_color, post_color])
+
 
 
 if __name__ == "__main__":
     
     # Create a model and compute the Jacobian
-    #model = sokm.from_random_sparse_graph(num_nodes=80, edge_probability=0.3, damping_coefficient=0.01)
+    #model = sokm.from_random_sparse_graph(num_nodes=8, edge_probability=0.1, damping_coefficient=0.01)
     #model = sokm.from_soft_random_geometric_graph(num_nodes=8, radius=0.3, damping_coefficient=0.01)
     #model.compute_jacobian()
     #model.summary()
-    model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\Instance_2026-05-11_17-20-36")
-
-
+    #model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\Instance_2026-05-11_17-20-36")
+    #model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\Instance_2026-06-02_16-36-00")
+    model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\Instance_2026-06-02_17-05-31")
 
     # Generate a shift matrix
     if False:

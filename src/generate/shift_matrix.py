@@ -40,6 +40,9 @@ class ShiftMatrix:
 
 
         self.eigenvalues, self.eigenvectors = la.eigh(self.jacobian)
+        idx = self.eigenvalues.argsort()
+        self.eigenvalues = self.eigenvalues[idx]
+        self.eigenvectors = self.eigenvectors[:,idx]
         self.shift_matrix: Optional[np.ndarray] = None
         self.Xs: Optional[np.ndarray] = None
         self.Ys: Optional[np.ndarray] = None
@@ -169,6 +172,53 @@ class ShiftMatrix:
 
         return obj
 
+    def ideal_zero_rows(self, num_vtn_nodes: int, eigenvalue_indices: List[int]) -> np.ndarray:
+        """
+        Generate a list of indices for rows that should be zero in the shift matrix.
+
+        Parameters
+        ----------
+        num_vtn_nodes : int
+            The number of nodes in the network.
+        eigenvalue_indices : List[int]
+            Indices of the eigenvalues to be shifted.
+
+        Returns
+        -------
+        np.ndarray
+            Array of indices for rows that should be zero in the shift matrix.
+        """
+        
+        #if len(eigenvalue_indices) > num_vtn_nodes +1 :
+        #    raise ValueError("Number of eigenvalues to be shifted cannot exceed the number of nodes in the network +1(global phase invariance and non driving constraint).")
+
+        #if num_vtn_nodes > self.jacobian.shape[0]-1:
+        #    raise ValueError("Number of nodes in the network cannot exceed the system dimension -1(global phase invariance and non driving constraint).")
+        
+        # fetch eigenvectors corresponding to the eigenvalue indices of the eigenvalues to be shifted
+        eigenvectors_to_shift = self.eigenvectors[:, eigenvalue_indices]
+
+        # search for largest entry, pick it as a vtn node, remove the corresponding row from the eigenvectors and repeat for other eigenvalues until all are processed.
+        def find_largest_entry_and_remove_row(eigenvectors, num_vtn_nodes=num_vtn_nodes):
+            vtn_nodes = []
+            while eigenvectors.shape[1]>0 and len(vtn_nodes)<num_vtn_nodes:
+                max_index = np.unravel_index(np.abs(eigenvectors).argmax(), eigenvectors.shape)
+                largest_entry_row = max_index[0]
+                vtn_nodes.append(largest_entry_row)
+                eigenvectors = np.delete(eigenvectors, largest_entry_row, axis=0)
+                eigenvectors = np.delete(eigenvectors, max_index[1], axis=1)
+            return vtn_nodes
+        
+        # if there are still vtn nodes to be picked repeat the process with the remaining rows
+        vtn_nodes=np.array([],dtype=int)
+        while len(vtn_nodes) < num_vtn_nodes:
+            vtn_nodes_new = find_largest_entry_and_remove_row(eigenvectors_to_shift, num_vtn_nodes-len(vtn_nodes))
+            eigenvectors_to_shift = np.delete(eigenvectors_to_shift, vtn_nodes_new, axis=0)
+            vtn_nodes = np.append(vtn_nodes, vtn_nodes_new)
+
+        zero_rows = np.arange(self.jacobian.shape[0], dtype=int)
+        zero_rows = np.setdiff1d(zero_rows, vtn_nodes)
+        return zero_rows
 
     def generate_index_sets(self, eigenvalue_indices: List[int], num_zero_rows: int, num_zero_cols: int) -> Tuple[List[np.ndarray], List[np.ndarray]]:
         """
@@ -207,8 +257,8 @@ class ShiftMatrix:
         # calculating the number of excess degrees of freedom that are not needed for the realization of the constraints
         excess_freedoms=system_dim-len(eigenvalue_indices)-num_zero_rows-num_zero_cols-1 #-1 bcs the eigenvectors [1,...,1] is not being used
         if excess_freedoms<0: #catching invalid unputs
-            raise ValueError("Network of size {} is too small for {} degrees of freedom.".format(system_dim,excess_freedoms))
-        
+            raise ValueError("Network of size {} is too small for {} zero rows and {} zero columns.".format(system_dim, num_zero_rows, num_zero_cols))
+
         # removing eigenvalue_indices from the available indices for X and Y index sets
         masking_out_eigenvalue_indices=np.full(system_dim-1,True)
         masking_out_eigenvalue_indices[eigenvalue_indices]=False

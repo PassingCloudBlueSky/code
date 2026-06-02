@@ -82,8 +82,11 @@ def create_shift_colors(num_shifts) -> list:
     individual_shift_colors_cmap = LinearSegmentedColormap.from_list("shift_cmap", color_range, N=256)
     shift_colors=[]
     #picking colors from the cmap
-    for i in range(num_shifts):
-        shift_colors.append(list(individual_shift_colors_cmap (i / (num_shifts - 1))))
+    if num_shifts==1:
+        shift_colors.append(list(individual_shift_colors_cmap(0.)))
+    else:
+        for i in range(num_shifts):
+            shift_colors.append(list(individual_shift_colors_cmap (i / (num_shifts - 1))))
 
     return shift_colors
 
@@ -418,7 +421,7 @@ def shift_matrix_construction_visualization_subplots(shift_matrix_obj:ShiftMatri
         saving_paths.append(visualize_matrix(left_vec=left_generators[index], right_vec=right_generators[index],label=labels, color=shift_colors[index], log=log, fs=fs, cutoff=cutoff, name=f"{"eigenspace" if in_eigenspace else "physical"}_shift_component_{index+1}.svg", save_dir=save_dir, min_max=min_max))
 
     # add row numbers to layered plot
-    if in_eigenspace is False:
+    if in_eigenspace is False and dim <=10:
         
         labels=[]
         for i in range(dim):
@@ -439,7 +442,7 @@ def shift_matrix_construction_visualization_subplots(shift_matrix_obj:ShiftMatri
 
 
 
-def compose_shift_matrix_construction_visualization(shift_matrix_obj:ShiftMatrix, log=True, absolute=True,fs=8, jac_color=darkblue):
+def compose_shift_matrix_construction_visualization(shift_matrix_obj:ShiftMatrix, log=True, absolute=True,fs=8, jac_color=darkblue, overwrite=False):
     """
     Compose a comprehensive visualization of the shift matrix construction process.
     This function generates a side-by-side comparison of the shift matrix construction
@@ -457,11 +460,17 @@ def compose_shift_matrix_construction_visualization(shift_matrix_obj:ShiftMatrix
         Font size for the plots. Default is 8.
     jac_color : str, optional
         Color for the Jacobian matrix visualization. Default is darkblue.
+    overwrite : bool, optional
+        If True, overwrite existing files. Default is False.
     -------
     save_dir : str
         Path to the saved combined SVG file (plots\\combined.svg).
     """
 
+    # checking overwrite
+    save_dir=os.path.join(shift_matrix_obj.current_dir,"combined.svg")
+    if overwrite is False and os.path.isfile(save_dir):
+        return save_dir
 
     # generate the subfigures based on the properties of shift_matrix_obj
     file_paths_physical=shift_matrix_construction_visualization_subplots(shift_matrix_obj, in_eigenspace=False, log=log, absolute=absolute, fs=fs, cutoff=1e-4, jac_color=jac_color)
@@ -548,7 +557,6 @@ def compose_shift_matrix_construction_visualization(shift_matrix_obj:ShiftMatrix
     line=sc.Line([(5,70),(45+70*(len(file_paths_physical)-1),70)],width=0.8)
     fig.append([line])
 
-    save_dir=os.path.join(shift_matrix_obj.current_dir,"combined.svg")
     fig.save(save_dir)
     png_path=os.path.join(shift_matrix_obj.current_dir,"combined.png")
     svg2png(url=save_dir,write_to=png_path,
@@ -1126,7 +1134,20 @@ def angle_comparison(model: sokm, shift_matrix_obj: ShiftMatrix, name="angle_com
 # plotting utils for publication figure on dynamics
 
 
-def plot_scenario_row(t_final, args, model, y_0, axes, nodes=[2,3], steps=8000, meta_scenario_name="scenario",overwrite=False, freqs_lims=(0.5, 3.5)):
+def plot_scenario_row(t_final, 
+                      args, 
+                      model, 
+                      y_0, 
+                      axes, 
+                      nodes=[2,3], 
+                      steps=8000, 
+                      meta_scenario_name="scenario",
+                      overwrite=False, 
+                      freqs_lims=(0.5, 3.5),
+                      min_max_psd=None, 
+                      psd_vlines=None,
+                      psd_vline_colors=None,
+                      alpha=1.):
     """
     Generates scenario data if it can't be loaded. Then adds shift power, power spectral density and selected trajectories to the provided axes. 
     
@@ -1140,14 +1161,14 @@ def plot_scenario_row(t_final, args, model, y_0, axes, nodes=[2,3], steps=8000, 
     psd=np.mean(psd, axis=0)
     freqs_vtn, psd_vtn = compute_psd_from_traj(traj["t"], traj["ys_shifted"][:np.shape(model.jacobian_matrix)[0], :])
     psd_vtn=np.mean(psd_vtn, axis=0)
-    plot_psd(axes[3],freqs,psd,freqs_vtn=freqs_vtn,psd_vtn=psd_vtn,freqs_lims=freqs_lims)
+    min_max_psd = plot_psd(axes[3],freqs,psd,freqs_vtn=freqs_vtn,psd_vtn=psd_vtn,freqs_lims=freqs_lims, min_max=min_max_psd, vlines=psd_vlines, vline_colors=psd_vline_colors)
 
     # plot shift powers over time
     axes[0]= plot_vtn_powers(axes[0],traj, args[3][0],model)
 
     # plot dynamics of selected nodes
-    plot_trajectories_split(traj, axes=axes[1:1+len(nodes)], nodes=nodes, y_0=y_0)
-    return axes
+    plot_trajectories_split(traj, axes=axes[1:1+len(nodes)], nodes=nodes, y_0=y_0, alpha=alpha)
+    return min_max_psd
 
 
 def compute_psd_from_traj(t, vals):
@@ -1158,7 +1179,7 @@ def compute_psd_from_traj(t, vals):
     freqs, psd = scipy.signal.welch(vals, fs=1/(t[1]-t[0]), axis=-1, nperseg=len(t))
     return freqs, psd
 
-def plot_trajectories_split(traj, axes, nodes, y_0=None):
+def plot_trajectories_split(traj, axes, nodes, y_0=None, alpha=1.):
 
     t=traj["t"]
     ys=traj["ys"]
@@ -1179,8 +1200,8 @@ def plot_trajectories_split(traj, axes, nodes, y_0=None):
                 min_max[0]=min
             if max>min_max[1]:
                 min_max[1]=max
-        axes[i].plot(t, ys[node, :], color=black, linewidth=0.5, label="unshifted")
-        axes[i].plot(t, ys_shifted[node, :], color=red, linewidth=0.5, label="shifted")
+        axes[i].plot(t, ys[node, :], color="black", linewidth=0.5, label="unshifted", alpha=alpha)
+        axes[i].plot(t, ys_shifted[node, :], color=darkblue, linewidth=0.5, label="shifted", alpha=alpha)
         if i < len(nodes)-1:
             axes[i].set_xticks([])
     return min_max
@@ -1201,7 +1222,7 @@ def generate_or_fetch_scenario_data(t_final: float, args, model: BaseModel, y_0=
     # checking if data already exists
     if save_dir == None:
         save_dir=shift[1][0].current_dir
-    filepath = os.path.join(save_dir,meta_scenario_name)+".npz"
+    filepath = os.path.join(save_dir,meta_scenario_name)+"_tfinal"+str(t_final)+".npz"
 
     if overwrite is False and os.path.isfile(filepath):
         traj = np.load(filepath, allow_pickle=True)
@@ -1232,10 +1253,18 @@ def generate_or_fetch_scenario_data(t_final: float, args, model: BaseModel, y_0=
     return np.load(filepath, allow_pickle=True)
 
 
-def plot_psd(axes,freqs,psd,freqs_vtn=None,psd_vtn=None,vlines=None,freqs_lims=None):
+def plot_psd(axes,freqs,psd,freqs_vtn=None,psd_vtn=None,freqs_lims=None, min_max=None, vlines=None, vline_colors=None):
     """
     Plots a histogram for the provided power spectral density. If psd_vtn is provided it is layered on top.
     """
+    # updating min_max
+    if min_max is not None:
+        min_max[0]=min(min_max[0], np.min(psd),np.min(psd_vtn) if psd_vtn is not None else np.inf)
+        min_max[1]=max(min_max[1], np.max(psd),np.max(psd_vtn) if psd_vtn is not None else -np.inf)
+    else:
+        min_max=np.empty(2)
+        min_max[0]=min( np.min(psd),np.min(psd_vtn) if psd_vtn is not None else np.inf)
+        min_max[1]=max( np.max(psd),np.max(psd_vtn) if psd_vtn is not None else -np.inf)
 
     # plotting psd hist
     axes.plot(freqs, psd, color="grey",alpha=0.8)
@@ -1244,14 +1273,21 @@ def plot_psd(axes,freqs,psd,freqs_vtn=None,psd_vtn=None,vlines=None,freqs_lims=N
     # plotting psd_vtn if provided
     if np.any(psd_vtn!=None) and np.any(freqs_vtn!=None):
         axes.plot(freqs_vtn, psd_vtn, color=darkblue, alpha=0.8)
-    
+        #axes.hist(psd_vtn, bins=freqs_vtn, color="grey", alpha=0.8)
+
+    # plotting vertical lines if provided
+    if vlines is not None and vline_colors is not None:
+        for vline, color in zip(vlines, vline_colors):
+            axes.axvline(x=vline/(2*np.pi), color=color, linestyle="--", linewidth=0.5, alpha=1.)
+
     if freqs_lims is not None:
-        #print("not setting freqs lims")
         axes.set_xlim(freqs_lims)
     #axes.set_xscale("log")
     axes.set_ylim(bottom=1e-8)
     axes.set_yscale("log")
     axes.set_xlabel(r"$\omega/2\pi$ [Hz]")
+
+    return min_max
 
     
 def plot_vtn_powers(axes, traj, shift_matrix_obj:ShiftMatrix, model: sokm, threshhold= 1e-8, absolute=False):
@@ -1274,12 +1310,12 @@ def plot_vtn_powers(axes, traj, shift_matrix_obj:ShiftMatrix, model: sokm, thres
     if absolute:
         p_vtn_average=np.abs(p_vtn_average)
     # bess colors
-    colors=["orange", "blue","green","red","darkblue"]
-
+    #colors=["orange", "blue","green","red","darkblue"]
+    colors=[]
     # plot
     for bess_index in range(len(vtn_nodes)):
         #axes.plot(t,p_vtn[bess_index], color=colors[bess_index],linewidth=0.5)
-        axes.plot(t[1:],p_vtn_average[bess_index],color=colors[bess_index],linewidth=0.5)
+        axes.plot(t[1:],p_vtn_average[bess_index],color=colors[bess_index] if len(colors) > bess_index else orange,linewidth=0.5, alpha=0.8)
         #plt.plot(t,p_vtn[bess_index], color=colors[bess_index])
         #plt.plot(t[1:],p_vtn_average[bess_index], linestyle="--",color=colors[bess_index])
         #plt.show()

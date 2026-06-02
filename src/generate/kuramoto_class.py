@@ -364,7 +364,7 @@ class SecondOrderKuramotoModel(BaseModel):
                 response_amplitudes[i,:]+=np.abs(eigvecs[l,k]*eigvecs[l,i]/(-omega**2+1j*omega*self.damping_coefficient-eigvals[l]))
         return response_amplitudes
 
-    def predict_resonance_frequencies(self, S=None, shifted_eigvals=None) -> np.ndarray:
+    def predict_resonance_frequencies(self, indices=None, S=None, shifted_eigvals=None) -> np.ndarray:
         """
         Predict resonance frequencies based on eigenvalues and damping.
 
@@ -386,11 +386,17 @@ class SecondOrderKuramotoModel(BaseModel):
         # shifted and unshifted
         if S is not None:
             eigvals=np.linalg.eigvals(self.jacobian_matrix+S)
+            eigvals=np.sort(eigvals)
+            if indices is not None:
+                eigvals=eigvals[indices]
+        elif indices is not None:
+            eigvals=np.linalg.eigvals(self.jacobian_matrix)
+            eigvals= np.sort(eigvals)[indices]
         elif shifted_eigvals is not None:
-            eigvals=shifted_eigvals
+            eigvals=np.sort(shifted_eigvals)
         else:
-            eigvals = np.linalg.eigvalsh(self.jacobian_matrix)
-
+            eigvals = np.sort(np.linalg.eigvalsh(self.jacobian_matrix))
+        eigvals = eigvals[np.invert(np.isnan(eigvals))]
         return np.sqrt(np.abs(eigvals) - (self.damping_coefficient**2) / 4)
     
         
