@@ -106,12 +106,61 @@ if False:
         scaling = max_val/np.max(np.abs(noise)) 
         return freqs, psd * scaling, (noise - integrated_noise[-1]/len(integrated_noise))* scaling
 
+def sine_perturbation_single_node(t,y,args):
+        """
+        Example perturbation function that computes a sine perturbation based on the current time and state vector.
+
+        Parameters:
+        -------
+        t: float
+            Current time.
+        y: array-like
+            Current state vector.
+        args: tuple
+            Tuple of the shape (amplitude, frequency) where:
+            - amplitude: float
+                The amplitude of the cosine perturbation.
+            - frequency: float
+                The frequency of the cosine perturbation.
+            - node_index: int
+                The index of the state variable to which the perturbation should be applied.
+
+        Returns:
+        -------
+        perturbation_value: array-like
+            The computed cosine perturbation value based on the current time applied to the specified node index in the state vector.
+        """
+
+        amplitude, frequency, node_index = args
+
+        # Example perturbation: a simple cosine function of time with given amplitude and frequency
+        if np.isscalar(t):
+            perturbation_vector = np.zeros_like(y)
+            perturbation_vector[node_index] = amplitude * np.sin( frequency * t)
+        else:
+            perturbation_vector = np.zeros((len(y),len(t)))
+            perturbation_vector[node_index,:] = amplitude * np.sin( frequency * t)
+        # TODO: loop over node_indices if node_index is array of int
+        
+
+        return perturbation_vector
 
 class ContinuousSpectrumNoise: 
     def __init__(self, spectrum_func, func_params, max_val=0.05, steps=1024, samples_per_step=1, rate=1., perturbed_node=0):
         """
         Continuous noise generator using sum-of-sinusoids.
         """
+        if spectrum_func==sine_spectrum:
+            self.steps = 1
+            self.samples = 1
+            self.rate = 1
+            self.t_max = self.steps / rate
+            self.freqs=np.array([func_params["frequency"]])
+            self.amps=np.array([max_val])
+            self.phases=np.zeros(1)
+            self.perturbed_node= perturbed_node
+            
+
         self.steps = steps + 1
         self.samples = self.steps * samples_per_step
         self.rate = rate
@@ -234,6 +283,16 @@ def realistic_spectrum(freqs, min=0.05,cutoff=6):
     psd = np.zeros_like(freqs)
     psd [freqs<cutoff]= freqs[freqs<cutoff]**(-5/3) 
     psd [freqs<min] = 0
+    #plt.plot(freqs[freqs<cutoff]*2*np.pi, psd[freqs<cutoff])
+    #plt.show()
+    return psd
+
+def sine_spectrum(freqs, frequency=1.5, amplitude=1.0):
+    """
+    Example spectrum function that generates a more realistic spectrum by combining an exponentially decaying spectrum with a Gaussian peak.
+    """
+    psd = np.zeros_like(freqs)
+    psd [np.isclose(freqs, frequency, atol=1e-2)] = amplitude
     #plt.plot(freqs[freqs<cutoff]*2*np.pi, psd[freqs<cutoff])
     #plt.show()
     return psd

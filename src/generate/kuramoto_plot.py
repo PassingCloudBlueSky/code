@@ -245,7 +245,9 @@ def plot_network(
     threshhold=1e-10,
     perturbed_node=None,
     node_colors=None,
-    axes=None
+    axes=None,
+    node_size=10,
+    labels=False
 ):
     """
     Plot a network with edge weights represented as thickness or as geometry (edge length), plus an
@@ -324,23 +326,77 @@ def plot_network(
         node_color=node_colors_from_perturbation_distance(perturbed_node, model, cmap=plt.cm.cividis) #coloring nodes according to their distance to the perturbed node. The closer the node the more intense the color. Nodes further than max_distance are colored with the base color
     else:
         node_color=node_colors
+
+    # Highlight vtn nodes if provided
+    if shift_matrix_obj!=None:
+        
+        # fetch individual shift matrices and their color coding
+        individual_shift_matrices=shift_matrix_obj.cunstruct_individual_shift_matrices(in_eigenspace=False)
+        n_individual_shift_matrices=len(individual_shift_matrices)
+        shift_colors=create_shift_colors(n_individual_shift_matrices) 
+        
+
+        for shift_number in range(n_individual_shift_matrices):
+
+            # collecting all non zero row indices of the individual shift aka the nodes which need active control
+            vtn_nodes= np.nonzero(np.any(individual_shift_matrices[shift_number] > threshhold, axis=1))[0]
+
+            # Fully connect the vtn nodes with dashed edges
+            for i, node1 in enumerate(vtn_nodes):
+                for node2 in vtn_nodes[i + 1 :]:
+                    ax.plot(
+                        [pos[node1][0], pos[node2][0]],
+                        [pos[node1][1], pos[node2][1]],
+                        linestyle=vtn_edge_style,
+                        color=shift_colors[shift_number],
+                        alpha=0.7,
+                        linewidth=np.average(edge_widths)
+                    )
+
     # Draw the base graph
     nx.draw(
         G,
         pos,
         ax=ax,
         with_labels=False,
-        node_size=10,
+        node_size=node_size,
         node_color=node_color,
         font_size=fs,
         font_color="black",
         edge_color=edge_colors,
         width=edge_widths,
+        linewidths=2,
         alpha=1.,  # Base opacity for edges
     )
 
+    # Highlight vtn nodes if provided
+    if shift_matrix_obj!=None:
+        
+        # fetch individual shift matrices and their color coding
+        individual_shift_matrices=shift_matrix_obj.cunstruct_individual_shift_matrices(in_eigenspace=False)
+        n_individual_shift_matrices=len(individual_shift_matrices)
+        shift_colors=create_shift_colors(n_individual_shift_matrices) 
+        
+
+        for shift_number in range(n_individual_shift_matrices):
+
+            # collecting all non zero row indices of the individual shift aka the nodes which need active control
+            vtn_nodes= np.nonzero(np.any(individual_shift_matrices[shift_number] > threshhold, axis=1))[0]
+
+            # overlying the shift color for the vtn nodes
+            nx.draw_networkx_nodes(
+                    G,
+                    pos,
+                    nodelist=vtn_nodes,
+                    edgecolors=list(shift_colors[shift_number]),
+                    node_color=[0.,0.,0.,0.],
+                    node_size=node_size+15,
+                    ax=ax,
+                )
+
+
     # Annotate nodes with their numbers
-    if model.connectivity_matrix.shape[0] <= 10:  # Only add labels if there are 20 or fewer nodes for readability
+    if model.connectivity_matrix.shape[0] <= 10 and labels:  # Only add labels if there are 20 or fewer nodes for readability
         nx.draw_networkx_labels(
             G,
             pos,
@@ -364,44 +420,7 @@ def plot_network(
             )
     """
 
-    # Highlight vtn nodes if provided
-    if shift_matrix_obj!=None:
-        
-        # fetch individual shift matrices and their color coding
-        individual_shift_matrices=shift_matrix_obj.cunstruct_individual_shift_matrices(in_eigenspace=False)
-        n_individual_shift_matrices=len(individual_shift_matrices)
-        shift_colors=create_shift_colors(n_individual_shift_matrices) 
-        
-
-        for shift_number in range(n_individual_shift_matrices):
-
-            # collecting all non zero row indices of the individual shift aka the nodes which need active control
-            vtn_nodes= np.nonzero(np.any(individual_shift_matrices[shift_number] > threshhold, axis=1))[0]
-
-            # overlying the shift color for the vtn nodes
-            if False:
-                nx.draw_networkx_nodes(
-                    G,
-                    pos,
-                    nodelist=vtn_nodes,
-                    node_color=list(shift_colors[shift_number]),
-                    node_size=100,
-                    alpha=None,
-                    ax=ax,
-                )
-
-
-            # Fully connect the vtn nodes with dashed edges
-            for i, node1 in enumerate(vtn_nodes):
-                for node2 in vtn_nodes[i + 1 :]:
-                    ax.plot(
-                        [pos[node1][0], pos[node2][0]],
-                        [pos[node1][1], pos[node2][1]],
-                        linestyle=vtn_edge_style,
-                        color=shift_colors[shift_number],
-                        alpha=0.7,
-                        linewidth=np.average(edge_widths)
-                    )
+    
 
     if axes== None:
         # Save the figure 
@@ -804,8 +823,9 @@ def generate_scenarios(model:sokm, noise_type="realistic", perturbation_strength
     """
 
     # making sure that input is valid
-    if noise_type not in ("exp_gaussian", "gaussian", "white", "realistic", "realistic+peak"):
-        raise ValueError("noise_type must be 'exp_gaussian' or 'gaussian' or 'white' or 'realistic' or 'realistic+peak'")
+    if noise_type not in ("sine","exp_gaussian", "gaussian", "white", "realistic", "realistic+peak"):
+
+        raise ValueError("noise_type must be 'sine','exp_gaussian' or 'gaussian' or 'white' or 'realistic' or 'realistic+peak'")
 
 
     # checking if step size is sufficient to capture the non-local dynamics of the network
@@ -866,6 +886,9 @@ def generate_scenarios(model:sokm, noise_type="realistic", perturbation_strength
         realistic_peak_params = {'cutoff': np.max(all_orig_freqs)/(2*np.pi), 'min': 0.05, 'center': center, 'width': width*0.3/2}
         noise_object = dynamics.ContinuousSpectrumNoise(dynamics.realistic_spectrum_with_peak, realistic_peak_params, max_val=0.05, steps=frequency_samples, rate=1.)
         noise_label=r"realistic + peak"
+    elif noise_type=="sine":
+
+        pert=(dynamics.sine_perturbation_single_node, (amplitude, frequency, perturbed_node))
 
     noise_object.save(model.current_dir)
     print(f"Saved noise object with {noise_type} spectrum to {model.current_dir}")
@@ -874,6 +897,53 @@ def generate_scenarios(model:sokm, noise_type="realistic", perturbation_strength
     # compose into scenarios 
     return [pert+shift_a,pert+shift_b]
 
+def generate_sine_scenarios(model:sokm, amplitude=0.1, overwrite=True):
+    """
+    A helper function to generate the the scenarios for handling in plot dynamics evaluation and ultimately dynamics.integrate_f.
+    THe hardcoded scenarios are:
+        - 3 BESS in identical loactions
+        - one shift and two shifts
+        - identical driving of the system
+    """
+
+    all_orig_freqs = model.predict_resonance_frequencies()
+    all_orig_freqs = all_orig_freqs[np.invert(np.isnan(all_orig_freqs))]
+
+    shift_matrix_obj_a = ShiftMatrix(model=model)
+    shift_matrix_obj_b = ShiftMatrix(model=model)
+
+    # setting vtn parameters and calculating rudimentary ideal vtn node locations for the given shifts and vtn size
+    #zero_rows = np.array([5,6,7],dtype=int)
+    num_vtn_nodes = 2
+    zero_cols = np.array([],dtype=int)
+    eigenvalue_indices_a = [2]
+    shifts_a = np.array([-0.6],dtype=float)
+    eigenvalue_indices_b = [ 5]
+    shifts_b = np.array([-0.5],dtype=float)
+    zero_rows = shift_matrix_obj_a.ideal_zero_rows(num_vtn_nodes, eigenvalue_indices_a+eigenvalue_indices_b) 
+    print(zero_rows)
+    # generate shift matrices    
+    shift_matrix_obj_a.construct_from_scratch(eigenvalue_indices_a, shifts_a, zero_rows, zero_cols)
+    shift_args_a = (shift_matrix_obj_a, model, None)
+    shift_a = (dynamics.jacobian_shift, shift_args_a)
+    compose_shift_matrix_construction_visualization(shift_matrix_obj_a, log=True, absolute=True,fs=10, jac_color=darkblue,overwrite=overwrite)
+
+    
+    shift_matrix_obj_b.construct_from_scratch(eigenvalue_indices_b, shifts_b, zero_rows, zero_cols)
+    shift_args_b = (shift_matrix_obj_b, model, None)
+    shift_b = (dynamics.jacobian_shift, shift_args_b)
+    compose_shift_matrix_construction_visualization(shift_matrix_obj_b, log=True, absolute=True,fs=10, jac_color=darkblue,overwrite=overwrite)
+    
+    #all_orig_freqs = all_orig_freqs[np.invert(np.isnan(all_orig_freqs))]
+    #prior_shift_freqs=all_orig_freqs[shift_matrix_obj.eigenvalue_indices]
+
+    
+    pert_a = (dynamics.sine_perturbation_single_node, (amplitude,all_orig_freqs[eigenvalue_indices_a[0]],perturbed_node))
+    
+    pert_b = (dynamics.sine_perturbation_single_node, (amplitude,all_orig_freqs[eigenvalue_indices_b[0]],perturbed_node))
+    
+    # compose into scenarios 
+    return [pert_a+shift_a,pert_b+shift_b]
 
 def v_line_locations_from_shift(model:sokm, shift_matrix_obj:ShiftMatrix):
     """
@@ -914,6 +984,123 @@ def v_line_locations_from_shift(model:sokm, shift_matrix_obj:ShiftMatrix):
     return np.concatenate([frequencies_prior, frequencies_post_theo]), np.concatenate([pre_color, post_color])
 
 
+def network_w_response(scenario, 
+                       model:sokm, 
+                       t_final, 
+                       steps, 
+                       min_max=None,
+                       y_0=None, 
+                       scenario_name="test", 
+                       overwrite=True, 
+                       vtn_on=True, 
+                       only_perturbation=False, 
+                       node=0, 
+                       t_traj=200,
+                       save_dir=None, 
+                       linewidth=1.):
+
+    shift_matrix_obj = scenario[3][0] if vtn_on else None
+    pert_amplitude, pert_freq, pert_node= scenario[1]
+
+    # create grid of subplots with first axis narrower than the others
+    fig, axes = plt.subplots(1, 3, figsize=(2.8, 0.4), gridspec_kw={"width_ratios": [2, 3, 3]})
+
+    # calculate trajectories
+    traj=generate_or_fetch_scenario_data(t_final, scenario, model, y_0=y_0, steps=steps, meta_scenario_name=meta_scenario_name, overwrite=overwrite, minus_fixpoint= True)
+    t=traj["t"]
+    if vtn_on:
+        vals=traj["ys_shifted"][:np.shape(model.jacobian_matrix)[0],:] #fetching only the node trajectories, not the velocity trajectories
+    else:
+        vals=traj["ys"][:np.shape(model.jacobian_matrix)[0],:] #fetching only the node trajectories, not the velocity trajectories
+    if only_perturbation:
+        vals=np.zeros((np.shape(model.jacobian_matrix)[0],steps+1))
+        vals=dynamics.sine_perturbation_single_node(t,vals[:,0],scenario[1])
+        node = pert_node # setting node i.e. the of vals which we plot to the index of perturbed node
+    # calculate steady state response psd for each node
+    freqs, psd = compute_psd_from_traj(t, vals)
+
+    # plotting network
+    if only_perturbation:
+        axes[0].axis("off")
+    else:
+        # fold with perturbation psd to get color coding of nodes according to their response to the driving signal, or just np.max
+        response_amplitude = np.max(psd, axis=1)
+        response_amplitude = response_amplitude / (2*np.max(response_amplitude))+0.5  # Normalize to [0.5,1.]
+        node_colors = plt.cm.RdYlBu_r(response_amplitude)
+
+        # plot network with node color coding according to response psd
+        plot_network(
+            model,
+            shift_matrix_obj= shift_matrix_obj,
+            seed=42,
+            vtn_edge_style="dashed",
+            name="network.svg", 
+            fs=10,
+            threshhold=1e-10,
+            perturbed_node=None,
+            node_colors=node_colors,
+            axes=axes[0],
+            node_size=10,
+            labels=False
+        )
+
+    # plot trajectory for one selected node
+    
+    t_traj_index=np.abs(t - t_traj).argmin() # find t closest to t_traj bases on steps
+    axes[1].plot(t[t_traj_index:], vals[node,t_traj_index:], color="black",linewidth=linewidth)
+    axes[1].set_xlim(t_traj,t_final)
+    if min_max==None:
+        min_max=(min(vals[node,t_traj_index:]),max(vals[node,t_traj_index:]))
+    axes[1].set_ylim(min_max)
+    axes[1].set_yticks(np.round(min_max,decimals=2))
+
+    # calculate theoretical psd of that node and plot it
+    omega=generate_frequency_range(model,extra_scope=0.2)
+    delta=0.05
+    
+    if only_perturbation:
+        axes[2].vlines(pert_freq,0,pert_amplitude, color="black", linewidth=linewidth)
+    else:
+        S=shift_matrix_obj.shift_matrix if vtn_on else None
+        response_vals=model.calculate_response_amplitudes(omega,S=S,k=pert_node)
+        axes[2].plot(omega, response_vals[node], color="black",linewidth=linewidth)
+    axes[2].set_xlim(min(omega),max(omega))
+    axes[2].set_yscale("log")
+    rect=plt.Rectangle((pert_freq-delta,0), 2*delta, 1e3, color="blue",alpha=0.3,edgecolor=None)
+    axes[2].add_patch(rect)
+
+    # saving as SVG and PNG
+    if save_dir is None:
+        if shift_matrix_obj is not None:
+            save_dir = shift_matrix_obj.current_dir
+        else:
+            shift_matrix_obj = scenario[3][0]
+            save_dir = shift_matrix_obj.current_dir
+    if only_perturbation:
+        specific_name=scenario_name+"_perturbation"
+    else:
+        specific_name=scenario_name+"_vtn" if vtn_on else scenario_name+"_no_vtn"
+    svg_path=save_figure(fig, save_dir=save_dir, name=specific_name+".svg")
+    png_path=os.path.join(save_dir,specific_name+".png")
+    svg2png(url=svg_path,write_to=png_path,
+                parent_height=110,parent_width=400,output_height=115*4,output_width=400*4)
+    return svg_path
+
+
+def illustrative(model:sokm, amplitude=0.1, overwrite=True,y_0=None,node=0):
+    scenarios= generate_sine_scenarios(model, amplitude=0.1, overwrite=False)
+    paths=np.empty((len(scenarios),3),dtype=String)
+    for i,scenario in enumerate(scenarios):
+        traj=generate_or_fetch_scenario_data(t_final, scenario, model, y_0=y_0, steps=steps, meta_scenario_name=meta_scenario_name, overwrite=overwrite, minus_fixpoint= True)
+        mini=min(np.min(traj["ys"][node,:]),np.min(traj["ys_shifted"][node,:]))
+        maxi=max(np.max(traj["ys"][node,:]),np.max(traj["ys_shifted"][node,:]))
+        min_max=(mini,maxi)
+        paths[i,0]=(network_w_response(scenario, model, t_final, y_0=y_0, steps=steps, scenario_name=meta_scenario_name, overwrite=overwrite, vtn_on=True, node=node, t_traj=550,min_max=min_max))
+        paths[i,1]=(network_w_response(scenario, model, t_final, y_0=y_0, steps=steps, scenario_name=meta_scenario_name, overwrite=overwrite, vtn_on=False, node=node, t_traj=550,min_max=min_max))
+        paths[i,2]=(network_w_response(scenario, model, t_final, only_perturbation=True, y_0=y_0, steps=steps, scenario_name=meta_scenario_name, overwrite=overwrite, vtn_on=False, node=node, t_traj=550,min_max=min_max))
+    return paths
+
+
 
 if __name__ == "__main__":
     
@@ -924,7 +1111,7 @@ if __name__ == "__main__":
     #model.summary()
     #model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\Instance_2026-05-11_17-20-36")
     #model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\Instance_2026-06-02_16-36-00")
-    model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\Instance_2026-06-02_17-05-31")
+    model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\Instance_2026-06-03_15-42-09")
 
     # Generate a shift matrix
     if False:
@@ -945,23 +1132,28 @@ if __name__ == "__main__":
     #compose_shift_matrix_construction_visualization(shift_matrix_obj, log=True, absolute=True,fs=8, jac_color=black)
     perturbed_node=5
     t_final=600
+    steps=16000
+    meta_scenario_name="sine_scenario"
     #angle_comparison(model, shift_matrix_obj)
     nodes=[0,3]
     #generate_scenarios(model, noise_type="realistic", perturbation_strength=0.1, frequency_samples=400 , steps=8000)
-    plot_dynamics_evaluation(t_final,
-                                model,
-                                nodes=nodes,
-                                perturbation_strength=0.01,
-                                steps=16000,
-                                y_0=None,
-                                name="dynamics_comparison", 
-                                save_dir=None,
-                                fontsize=5,
-                                perturbed_node=perturbed_node,
-                                noise_type="realistic",
-                                overwrite=False
-                                )
+    if False:
+        plot_dynamics_evaluation(t_final,
+                                    model,
+                                    nodes=nodes,
+                                    perturbation_strength=0.01,
+                                    steps=steps,
+                                    y_0=None,
+                                    name="dynamics_realistic", 
+                                    save_dir=None,
+                                    fontsize=5,
+                                    perturbed_node=perturbed_node,
+                                    noise_type="realistic",
+                                    overwrite=False
+                                    )
 
+    #scenarios = generate_scenarios(model, noise_type="sine", perturbation_strength=0.1, frequency_samples=400 , steps=steps, overwrite=True)
+    illustrative(model, amplitude=0.1, overwrite=False)
     # noise or driving, what is the difference?
     # ways forward: 
     # write integrator yourself ( but if I mess it up, that will be very shitty)

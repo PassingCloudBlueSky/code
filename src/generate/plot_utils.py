@@ -1208,7 +1208,7 @@ def plot_trajectories_split(traj, axes, nodes, y_0=None, alpha=1.):
 
 
 def generate_or_fetch_scenario_data(t_final: float, args, model: BaseModel, y_0=None, steps=8000, meta_scenario_name="default",
-                    save_dir: Optional[str]=None, overwrite=False):
+                    save_dir: Optional[str]=None, overwrite=False, minus_fixpoint=False):
 
     """
     Checks if the trajectory data of the scenario (w and w/o) VTN already exists. If so it is loaded. Else generated and saved. 
@@ -1248,7 +1248,7 @@ def generate_or_fetch_scenario_data(t_final: float, args, model: BaseModel, y_0=
         ys[:len(y_0)] -= y_0[:, None]
         ys_shifted[:len(y_0)] -= y_0[:, None]
     
-    np.savez(filepath, t=t, ys=ys, ys_shifted=ys_shifted)
+    np.savez(filepath, t=t, ys=ys-y_0[:,None] if minus_fixpoint else ys, ys_shifted=ys_shifted- y_0[:,None] if minus_fixpoint else ys_shifted)
     
     return np.load(filepath, allow_pickle=True)
 
