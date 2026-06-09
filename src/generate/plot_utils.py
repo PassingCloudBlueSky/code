@@ -1171,11 +1171,13 @@ def plot_scenario_row(t_final,
     return min_max_psd
 
 
-def compute_psd_from_traj(t, vals):
+def compute_psd_from_traj(t, vals, steady_state_t=300):
     """
     Computes the power spectral density from a trajectory using scipy.signal.welch.
     """
-
+    steady_idx=np.argmin(np.abs(t-steady_state_t))
+    t=t[steady_idx:]
+    vals=vals[:,steady_idx:]
     freqs, psd = scipy.signal.welch(vals, fs=1/(t[1]-t[0]), axis=-1, nperseg=len(t))
     return freqs, psd
 

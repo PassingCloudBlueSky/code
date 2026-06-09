@@ -247,7 +247,7 @@ def plot_network(
     node_colors=None,
     axes=None,
     node_size=10,
-    labels=False
+    labels=True
 ):
     """
     Plot a network with edge weights represented as thickness or as geometry (edge length), plus an
@@ -349,16 +349,18 @@ def plot_network(
                         [pos[node1][1], pos[node2][1]],
                         linestyle=vtn_edge_style,
                         color=shift_colors[shift_number],
-                        alpha=0.7,
+                        alpha=1.,
                         linewidth=np.average(edge_widths)
                     )
 
     # Draw the base graph
+    if labels:
+        labels = np.arange()
     nx.draw(
         G,
         pos,
         ax=ax,
-        with_labels=False,
+        with_labels=labels,
         node_size=node_size,
         node_color=node_color,
         font_size=fs,
@@ -376,7 +378,8 @@ def plot_network(
         individual_shift_matrices=shift_matrix_obj.cunstruct_individual_shift_matrices(in_eigenspace=False)
         n_individual_shift_matrices=len(individual_shift_matrices)
         shift_colors=create_shift_colors(n_individual_shift_matrices) 
-        
+        for i, color in enumerate(shift_colors):
+            shift_colors[i][3]=1.
 
         for shift_number in range(n_individual_shift_matrices):
 
@@ -916,9 +919,9 @@ def generate_sine_scenarios(model:sokm, amplitude=0.1, overwrite=True):
     #zero_rows = np.array([5,6,7],dtype=int)
     num_vtn_nodes = 2
     zero_cols = np.array([],dtype=int)
-    eigenvalue_indices_a = [2]
+    eigenvalue_indices_a = [4]
     shifts_a = np.array([-0.6],dtype=float)
-    eigenvalue_indices_b = [ 5]
+    eigenvalue_indices_b = [ 6]
     shifts_b = np.array([-0.5],dtype=float)
     zero_rows = shift_matrix_obj_a.ideal_zero_rows(num_vtn_nodes, eigenvalue_indices_a+eigenvalue_indices_b) 
     print(zero_rows)
@@ -997,13 +1000,20 @@ def network_w_response(scenario,
                        node=0, 
                        t_traj=200,
                        save_dir=None, 
-                       linewidth=1.):
-
+                       linewidth=1.,
+                       psd_max=None,
+                       plot_real_psd=True,
+                       cmap= "coolwarm",
+                       axes=None,
+                       color="purple"):
     shift_matrix_obj = scenario[3][0] if vtn_on else None
     pert_amplitude, pert_freq, pert_node= scenario[1]
 
     # create grid of subplots with first axis narrower than the others
-    fig, axes = plt.subplots(1, 3, figsize=(2.8, 0.4), gridspec_kw={"width_ratios": [2, 3, 3]})
+    save=False
+    if axes is None:
+        save = True
+        fig, axes = plt.subplots(1, 2, figsize=(2.8, 0.6), gridspec_kw={"width_ratios": [3, 3]})
 
     # calculate trajectories
     traj=generate_or_fetch_scenario_data(t_final, scenario, model, y_0=y_0, steps=steps, meta_scenario_name=meta_scenario_name, overwrite=overwrite, minus_fixpoint= True)
@@ -1016,17 +1026,29 @@ def network_w_response(scenario,
         vals=np.zeros((np.shape(model.jacobian_matrix)[0],steps+1))
         vals=dynamics.sine_perturbation_single_node(t,vals[:,0],scenario[1])
         node = pert_node # setting node i.e. the of vals which we plot to the index of perturbed node
-    # calculate steady state response psd for each node
-    freqs, psd = compute_psd_from_traj(t, vals)
 
+    # calculate steady state response psd for each node
+    freqs, psd = compute_psd_from_traj(t, vals) 
     # plotting network
-    if only_perturbation:
-        axes[0].axis("off")
-    else:
-        # fold with perturbation psd to get color coding of nodes according to their response to the driving signal, or just np.max
-        response_amplitude = np.max(psd, axis=1)
-        response_amplitude = response_amplitude / (2*np.max(response_amplitude))+0.5  # Normalize to [0.5,1.]
-        node_colors = plt.cm.RdYlBu_r(response_amplitude)
+    if not only_perturbation:
+        # multiply with perturbation psd to get color coding of nodes according to their response to the driving signal, or just np.max
+        ax_network = axes[0].inset_axes([0.2, 0.2, 0.6, 0.75])
+        idx = np.argmin(np.abs(freqs - pert_freq)) #finding the frequency closes to the driving frequency
+        
+        if plot_real_psd:
+            for i in range(np.shape(psd)[0]):
+                plt.plot(freqs,psd[i,:],linewidth=0.5)
+        response_amplitude= psd[:,idx] # for visual quantification of response strength taking the values corresponding to that frequency
+        #response_amplitude = np.max(psd, axis=1)
+        if psd_max is None:
+            psd_max= np.max(response_amplitude)
+        print(f"Vtn is {"on" if vtn_on else "off"} and the max val is {np.max(response_amplitude)} normalized with {psd_max}")
+        if cmap=="RdYBlu_r":
+            response_amplitude = response_amplitude / (2*psd_max)+0.5 # Normalize to [0.5,1.]
+            node_colors = plt.cm.RdYlBu_r(response_amplitude)
+        elif cmap== "coolwarm":
+            response_amplitude = response_amplitude / (psd_max) # Normalize to [0.5,1.]
+            node_colors = plt.cm.coolwarm(response_amplitude)
 
         # plot network with node color coding according to response psd
         plot_network(
@@ -1039,7 +1061,8 @@ def network_w_response(scenario,
             threshhold=1e-10,
             perturbed_node=None,
             node_colors=node_colors,
-            axes=axes[0],
+            #axes=axes[0],
+            axes=ax_network,
             node_size=10,
             labels=False
         )
@@ -1047,58 +1070,142 @@ def network_w_response(scenario,
     # plot trajectory for one selected node
     
     t_traj_index=np.abs(t - t_traj).argmin() # find t closest to t_traj bases on steps
-    axes[1].plot(t[t_traj_index:], vals[node,t_traj_index:], color="black",linewidth=linewidth)
-    axes[1].set_xlim(t_traj,t_final)
+    axes[0].plot(t[t_traj_index:], vals[node,t_traj_index:], color=color if only_perturbation else node_colors[node],linewidth=linewidth)
+    axes[0].set_xlim(t_traj,t_final)
     if min_max==None:
-        min_max=(min(vals[node,t_traj_index:]),max(vals[node,t_traj_index:]))
-    axes[1].set_ylim(min_max)
-    axes[1].set_yticks(np.round(min_max,decimals=2))
+        min_max=(1.2*min(vals[node,t_traj_index:]),1.2*max(vals[node,t_traj_index:]))
+    else:
+        upper=-3*min_max[0]
+    axes[0].set_ylim(min_max)
+    axes[0].set_yticks(np.round(min_max if only_perturbation else (min_max[0],upper),decimals=1))
+
+    
 
     # calculate theoretical psd of that node and plot it
     omega=generate_frequency_range(model,extra_scope=0.2)
     delta=0.05
-    
+    rect=plt.Rectangle((pert_freq-delta,0), 2*delta, 1e3, color=color,alpha=0.3,edgecolor=[0,0,0,0],linewidth=linewidth)
+
     if only_perturbation:
-        axes[2].vlines(pert_freq,0,pert_amplitude, color="black", linewidth=linewidth)
+        axes[1].vlines(pert_freq,0,pert_amplitude, color="black", linewidth=linewidth,alpha=1)
     else:
         S=shift_matrix_obj.shift_matrix if vtn_on else None
         response_vals=model.calculate_response_amplitudes(omega,S=S,k=pert_node)
-        axes[2].plot(omega, response_vals[node], color="black",linewidth=linewidth)
-    axes[2].set_xlim(min(omega),max(omega))
-    axes[2].set_yscale("log")
-    rect=plt.Rectangle((pert_freq-delta,0), 2*delta, 1e3, color="blue",alpha=0.3,edgecolor=None)
-    axes[2].add_patch(rect)
+        axes[1].plot(omega, response_vals[node], color="black",linewidth=linewidth)
+    axes[1].set_xlim(min(omega),max(omega))
+    axes[1].set_yscale("log")
+    
+    axes[1].add_patch(rect)
+    axes[1].yaxis.tick_right()
 
     # saving as SVG and PNG
-    if save_dir is None:
-        if shift_matrix_obj is not None:
-            save_dir = shift_matrix_obj.current_dir
+    if save:
+        if save_dir is None:
+            if shift_matrix_obj is not None:
+                save_dir = shift_matrix_obj.current_dir
+            else:
+                shift_matrix_obj = scenario[3][0]
+                save_dir = shift_matrix_obj.current_dir
+        if only_perturbation:
+            specific_name=scenario_name+"_perturbation"
         else:
-            shift_matrix_obj = scenario[3][0]
-            save_dir = shift_matrix_obj.current_dir
-    if only_perturbation:
-        specific_name=scenario_name+"_perturbation"
+            specific_name=scenario_name+"_vtn" if vtn_on else scenario_name+"_no_vtn"
+        svg_path=save_figure(fig, save_dir=save_dir, name=specific_name+".svg")
+        png_path=os.path.join(save_dir,specific_name+".png")
+        svg2png(url=svg_path,write_to=png_path,
+                    parent_height=110,parent_width=400,output_height=115*4,output_width=400*4)
+        if not only_perturbation and not vtn_on:
+            return (psd_max, svg_path)
+        else:
+            return svg_path
     else:
-        specific_name=scenario_name+"_vtn" if vtn_on else scenario_name+"_no_vtn"
-    svg_path=save_figure(fig, save_dir=save_dir, name=specific_name+".svg")
-    png_path=os.path.join(save_dir,specific_name+".png")
-    svg2png(url=svg_path,write_to=png_path,
-                parent_height=110,parent_width=400,output_height=115*4,output_width=400*4)
-    return svg_path
+        return psd_max
 
 
-def illustrative(model:sokm, amplitude=0.1, overwrite=True,y_0=None,node=0):
+def illustrative(model:sokm, amplitude=0.1, overwrite=True,y_0=None,node=0,plot_real_psd=False,save_dir=None, specific_name="scenario"):
     scenarios= generate_sine_scenarios(model, amplitude=0.1, overwrite=False)
-    paths=np.empty((len(scenarios),3),dtype=String)
+
+    scenario_colors=["purple","orange","gold"]
     for i,scenario in enumerate(scenarios):
+        
+        fig, axes = plt.subplots(3, 2, figsize=(2.8, 1.5)) #, gridspec_kw={"width_ratios": [3, 3]})
+
         traj=generate_or_fetch_scenario_data(t_final, scenario, model, y_0=y_0, steps=steps, meta_scenario_name=meta_scenario_name, overwrite=overwrite, minus_fixpoint= True)
+        vals=np.zeros((np.shape(model.jacobian_matrix)[0],steps+1))
+        vals=dynamics.sine_perturbation_single_node(traj["t"],vals[:,0],scenario[1])
+        # y lims for trajectory plot
         mini=min(np.min(traj["ys"][node,:]),np.min(traj["ys_shifted"][node,:]))
         maxi=max(np.max(traj["ys"][node,:]),np.max(traj["ys_shifted"][node,:]))
-        min_max=(mini,maxi)
-        paths[i,0]=(network_w_response(scenario, model, t_final, y_0=y_0, steps=steps, scenario_name=meta_scenario_name, overwrite=overwrite, vtn_on=True, node=node, t_traj=550,min_max=min_max))
-        paths[i,1]=(network_w_response(scenario, model, t_final, y_0=y_0, steps=steps, scenario_name=meta_scenario_name, overwrite=overwrite, vtn_on=False, node=node, t_traj=550,min_max=min_max))
-        paths[i,2]=(network_w_response(scenario, model, t_final, only_perturbation=True, y_0=y_0, steps=steps, scenario_name=meta_scenario_name, overwrite=overwrite, vtn_on=False, node=node, t_traj=550,min_max=min_max))
-    return paths
+        maxi+=(maxi-mini)*4
+        min_max=(1.2*mini,1.2*maxi)
+
+        # consistent limits for colorcoding of response strength 
+        if False:
+            t=traj["t"]
+            vals=traj["ys_shifted"][:np.shape(model.jacobian_matrix)[0],:] #fetching only the node trajectories, not the velocity trajectories
+            vals=traj["ys"][:np.shape(model.jacobian_matrix)[0],:]
+            pert_amplitude, pert_freq, pert_node= scenario[1]
+            freqs, psd = compute_psd_from_traj(t, vals)
+            idx = np.argmin(np.abs(freqs - pert_freq))
+            response_amplitude= psd[:,idx]
+
+        network_w_response(scenario, 
+                           model, 
+                           t_final, 
+                           axes=axes[0,:],  
+                           color=scenario_colors[i],
+                           only_perturbation=True, 
+                           y_0=y_0, 
+                           steps=steps, 
+                           scenario_name=meta_scenario_name, 
+                           overwrite=overwrite, 
+                           vtn_on=False, 
+                           node=node, 
+                           t_traj=550,
+                           plot_real_psd=plot_real_psd)
+        psd_max=network_w_response(scenario, 
+                                   model, 
+                                   t_final, 
+                                   axes=axes[1,:],   
+                                    color=scenario_colors[i],
+                                   y_0=y_0, 
+                                   steps=steps, 
+                                   scenario_name=meta_scenario_name, 
+                                   overwrite=overwrite, 
+                                   vtn_on=False, 
+                                   node=node, 
+                                   t_traj=550,
+                                   min_max=min_max,
+                                   plot_real_psd=plot_real_psd)
+        (network_w_response(scenario, 
+                            model, 
+                            t_final, 
+                            axes=axes[2,:], 
+                            color=scenario_colors[i],
+                            y_0=y_0, 
+                            steps=steps, 
+                            scenario_name=meta_scenario_name, 
+                            overwrite=overwrite, 
+                            vtn_on=True,
+                            psd_max=psd_max, 
+                            node=node, 
+                            t_traj=550,
+                            min_max=min_max,
+                            plot_real_psd=plot_real_psd))
+        
+        axes[0,0].set_xticks([])
+        axes[0,1].set_xticks([])
+        axes[1,0].set_xticks([])
+        axes[1,1].set_xticks([])
+        plt.subplots_adjust(hspace=0.1, wspace=0.05)
+
+        shift_matrix_obj = scenario[3][0]
+        save_dir = shift_matrix_obj.current_dir
+        svg_path=save_figure(fig, save_dir=save_dir, name=specific_name+".svg")
+        png_path=os.path.join(save_dir,specific_name+".png")
+        svg2png(url=svg_path,write_to=png_path,
+                    parent_height=110,parent_width=400,output_height=115*4,output_width=400*4)
+
 
 
 
@@ -1153,7 +1260,7 @@ if __name__ == "__main__":
                                     )
 
     #scenarios = generate_scenarios(model, noise_type="sine", perturbation_strength=0.1, frequency_samples=400 , steps=steps, overwrite=True)
-    illustrative(model, amplitude=0.1, overwrite=False)
+    illustrative(model, amplitude=0.1, overwrite=False, node=3, plot_real_psd=False)
     # noise or driving, what is the difference?
     # ways forward: 
     # write integrator yourself ( but if I mess it up, that will be very shitty)
