@@ -1171,7 +1171,7 @@ def plot_scenario_row(t_final,
     return min_max_psd
 
 
-def compute_psd_from_traj(t, vals, steady_state_t=300):
+def compute_psd_from_traj(t, vals, steady_state_t=500):
     """
     Computes the power spectral density from a trajectory using scipy.signal.welch.
     """
@@ -1226,9 +1226,15 @@ def generate_or_fetch_scenario_data(t_final: float, args, model: BaseModel, y_0=
         save_dir=shift[1][0].current_dir
     filepath = os.path.join(save_dir,meta_scenario_name)+"_tfinal"+str(t_final)+".npz"
 
+    
+
     if overwrite is False and os.path.isfile(filepath):
+        print(f"Loading trajectory data from {filepath}")
         traj = np.load(filepath, allow_pickle=True)
         return traj
+    
+    print(f"Simulating trajectory data for {filepath}, since none was found.")
+
     
     dim = np.shape(model.jacobian_matrix)[0]
 

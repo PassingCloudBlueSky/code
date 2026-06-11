@@ -5,6 +5,7 @@ from typing import Optional
 import matplotlib.pyplot as plt
 from matplotlib import colors
 from matplotlib.colors import ListedColormap, Normalize, LinearSegmentedColormap
+plt.rcParams['text.usetex'] = True
 """
 plt.rcParams['text.usetex'] = True
 plt.rcParams['font.family'] = 'serif'  # Use LaTeX's default serif font
@@ -240,6 +241,7 @@ def plot_network(
     edge_weight_key="weight",
     edge_weight_visualization="length",
     vtn_edge_style="dashed",
+    vtn_color=None,
     name="network.svg", 
     fs=6,
     threshhold=1e-10,
@@ -327,13 +329,18 @@ def plot_network(
     else:
         node_color=node_colors
 
-    # Highlight vtn nodes if provided
-    if shift_matrix_obj!=None:
+    plot_vtn = type(shift_matrix_obj) is ShiftMatrix or type(shift_matrix_obj) is np.ndarray
+    # Drawing vtn edges if a shift matrix obj or shift matrix are provided
+    if plot_vtn:
         
-        # fetch individual shift matrices and their color coding
-        individual_shift_matrices=shift_matrix_obj.cunstruct_individual_shift_matrices(in_eigenspace=False)
-        n_individual_shift_matrices=len(individual_shift_matrices)
-        shift_colors=create_shift_colors(n_individual_shift_matrices) 
+        if vtn_color is None:
+            # fetch individual shift matrices and their color coding
+            individual_shift_matrices=shift_matrix_obj.cunstruct_individual_shift_matrices(in_eigenspace=False)
+            n_individual_shift_matrices=len(individual_shift_matrices)
+            shift_colors=create_shift_colors(n_individual_shift_matrices) 
+        else:
+            n_individual_shift_matrices=1
+            individual_shift_matrices=np.array([shift_matrix_obj])
         
 
         for shift_number in range(n_individual_shift_matrices):
@@ -348,14 +355,14 @@ def plot_network(
                         [pos[node1][0], pos[node2][0]],
                         [pos[node1][1], pos[node2][1]],
                         linestyle=vtn_edge_style,
-                        color=shift_colors[shift_number],
+                        color=shift_colors[shift_number] if vtn_color is None else vtn_color,
                         alpha=1.,
                         linewidth=np.average(edge_widths)
                     )
 
     # Draw the base graph
-    if labels:
-        labels = np.arange()
+    #if labels:
+        #labels = np.arange(np.shape(model.connectivity_matrix)[0])
     nx.draw(
         G,
         pos,
@@ -372,14 +379,16 @@ def plot_network(
     )
 
     # Highlight vtn nodes if provided
-    if shift_matrix_obj!=None:
+    if plot_vtn:
         
         # fetch individual shift matrices and their color coding
-        individual_shift_matrices=shift_matrix_obj.cunstruct_individual_shift_matrices(in_eigenspace=False)
-        n_individual_shift_matrices=len(individual_shift_matrices)
-        shift_colors=create_shift_colors(n_individual_shift_matrices) 
-        for i, color in enumerate(shift_colors):
-            shift_colors[i][3]=1.
+        if False:
+            individual_shift_matrices=shift_matrix_obj.cunstruct_individual_shift_matrices(in_eigenspace=False)
+            n_individual_shift_matrices=len(individual_shift_matrices)
+            shift_colors=create_shift_colors(n_individual_shift_matrices) 
+        if vtn_color is None:
+            for i in shift_colors:
+                shift_colors[i][3]=1.
 
         for shift_number in range(n_individual_shift_matrices):
 
@@ -391,23 +400,23 @@ def plot_network(
                     G,
                     pos,
                     nodelist=vtn_nodes,
-                    edgecolors=list(shift_colors[shift_number]),
+                    edgecolors=list(shift_colors[shift_number]) if vtn_color is None else vtn_color,
                     node_color=[0.,0.,0.,0.],
                     node_size=node_size+15,
                     ax=ax,
                 )
 
-
-    # Annotate nodes with their numbers
-    if model.connectivity_matrix.shape[0] <= 10 and labels:  # Only add labels if there are 20 or fewer nodes for readability
-        nx.draw_networkx_labels(
-            G,
-            pos,
-            labels={node: str(node+1) for node in G.nodes()},  # Label each node with its number
-            font_size=fs,
-            font_color="black",
-            ax=ax,
-        )
+    if False:
+        # Annotate nodes with their numbers
+        if model.connectivity_matrix.shape[0] <= 10 and labels:  # Only add labels if there are 20 or fewer nodes for readability
+            nx.draw_networkx_labels(
+                G,
+                pos,
+                labels={node: str(node+1) for node in G.nodes()},  # Label each node with its number
+                font_size=fs,
+                font_color="black",
+                ax=ax,
+            )
 
     """
     # highlighting the perturbing node
@@ -998,14 +1007,17 @@ def network_w_response(scenario,
                        vtn_on=True, 
                        only_perturbation=False, 
                        node=0, 
-                       t_traj=200,
+                       t_window=200,
                        save_dir=None, 
                        linewidth=1.,
                        psd_max=None,
                        plot_real_psd=True,
                        cmap= "coolwarm",
                        axes=None,
-                       color="purple"):
+                       color=None,
+                       labels=False,
+                       panel="a",
+                       fontsize=10):
     shift_matrix_obj = scenario[3][0] if vtn_on else None
     pert_amplitude, pert_freq, pert_node= scenario[1]
 
@@ -1016,7 +1028,7 @@ def network_w_response(scenario,
         fig, axes = plt.subplots(1, 2, figsize=(2.8, 0.6), gridspec_kw={"width_ratios": [3, 3]})
 
     # calculate trajectories
-    traj=generate_or_fetch_scenario_data(t_final, scenario, model, y_0=y_0, steps=steps, meta_scenario_name=meta_scenario_name, overwrite=overwrite, minus_fixpoint= True)
+    traj=generate_or_fetch_scenario_data(t_final, scenario, model, y_0=y_0, steps=steps, meta_scenario_name=scenario_name, save_dir=save_dir, overwrite=overwrite, minus_fixpoint= True)
     t=traj["t"]
     if vtn_on:
         vals=traj["ys_shifted"][:np.shape(model.jacobian_matrix)[0],:] #fetching only the node trajectories, not the velocity trajectories
@@ -1028,21 +1040,20 @@ def network_w_response(scenario,
         node = pert_node # setting node i.e. the of vals which we plot to the index of perturbed node
 
     # calculate steady state response psd for each node
-    freqs, psd = compute_psd_from_traj(t, vals) 
+    t_traj_index=np.abs(t - t_final + t_window).argmin() 
+    freqs, psd = compute_psd_from_traj(t[t_traj_index:], vals[:,t_traj_index:]) 
+    freqs =2*np.pi*freqs # converting to omega
     # plotting network
     if not only_perturbation:
         # multiply with perturbation psd to get color coding of nodes according to their response to the driving signal, or just np.max
         ax_network = axes[0].inset_axes([0.2, 0.2, 0.6, 0.75])
         idx = np.argmin(np.abs(freqs - pert_freq)) #finding the frequency closes to the driving frequency
         
-        if plot_real_psd:
-            for i in range(np.shape(psd)[0]):
-                plt.plot(freqs,psd[i,:],linewidth=0.5)
+
         response_amplitude= psd[:,idx] # for visual quantification of response strength taking the values corresponding to that frequency
         #response_amplitude = np.max(psd, axis=1)
         if psd_max is None:
             psd_max= np.max(response_amplitude)
-        print(f"Vtn is {"on" if vtn_on else "off"} and the max val is {np.max(response_amplitude)} normalized with {psd_max}")
         if cmap=="RdYBlu_r":
             response_amplitude = response_amplitude / (2*psd_max)+0.5 # Normalize to [0.5,1.]
             node_colors = plt.cm.RdYlBu_r(response_amplitude)
@@ -1050,12 +1061,17 @@ def network_w_response(scenario,
             response_amplitude = response_amplitude / (psd_max) # Normalize to [0.5,1.]
             node_colors = plt.cm.coolwarm(response_amplitude)
 
+        if plot_real_psd:
+            for i in range(np.shape(psd)[0]):
+                axes[1].plot(freqs,psd[i,:],linewidth=linewidth,color=node_colors[i])
+
         # plot network with node color coding according to response psd
         plot_network(
             model,
             shift_matrix_obj= shift_matrix_obj,
             seed=42,
             vtn_edge_style="dashed",
+            vtn_color=color,
             name="network.svg", 
             fs=10,
             threshhold=1e-10,
@@ -1064,20 +1080,23 @@ def network_w_response(scenario,
             #axes=axes[0],
             axes=ax_network,
             node_size=10,
-            labels=False
+            labels=labels
         )
 
     # plot trajectory for one selected node
     
-    t_traj_index=np.abs(t - t_traj).argmin() # find t closest to t_traj bases on steps
+    t_traj_index=np.abs(t - t_final + t_window).argmin() # find t closest to t_traj bases on steps
+    if color is None:
+        color=orange
     axes[0].plot(t[t_traj_index:], vals[node,t_traj_index:], color=color if only_perturbation else node_colors[node],linewidth=linewidth)
-    axes[0].set_xlim(t_traj,t_final)
+    axes[0].set_xlim( t_final - t_window,t_final)
     if min_max==None:
         min_max=(1.2*min(vals[node,t_traj_index:]),1.2*max(vals[node,t_traj_index:]))
     else:
         upper=-3*min_max[0]
     axes[0].set_ylim(min_max)
     axes[0].set_yticks(np.round(min_max if only_perturbation else (min_max[0],upper),decimals=1))
+    axes[0].set_xticks(np.round((np.min(t[t_traj_index:]),np.max(t[t_traj_index:]))))
 
     
 
@@ -1089,14 +1108,38 @@ def network_w_response(scenario,
     if only_perturbation:
         axes[1].vlines(pert_freq,0,pert_amplitude, color="black", linewidth=linewidth,alpha=1)
     else:
-        S=shift_matrix_obj.shift_matrix if vtn_on else None
+        S = None
+        if vtn_on:
+            if type(shift_matrix_obj) is ShiftMatrix:
+                S=shift_matrix_obj.shift_matrix
+            else:
+                S=shift_matrix_obj
         response_vals=model.calculate_response_amplitudes(omega,S=S,k=pert_node)
         axes[1].plot(omega, response_vals[node], color="black",linewidth=linewidth)
+        axes[1].set_ylim((np.min(response_vals[node]),10*np.max(response_vals[node])))
     axes[1].set_xlim(min(omega),max(omega))
+    if plot_real_psd:
+        axes[1].set_ylim((1e-10,10*np.max(response_vals[node])))
     axes[1].set_yscale("log")
     
     axes[1].add_patch(rect)
     axes[1].yaxis.tick_right()
+
+    label_offset=0
+    if only_perturbation is False and vtn_on is False:
+        label_offset=2
+    elif only_perturbation is False and vtn_on:
+        label_offset=4
+    axes[0].annotate(
+        panel+f"{str(1+label_offset)})",
+        xy=(0, 1), xycoords='axes fraction',
+        xytext=(+0.1, -0.1), textcoords='offset fontsize',
+        fontsize=fontsize, verticalalignment='top', fontfamily='serif')
+    axes[1].annotate(
+        panel+f"{str(2+label_offset)})",
+        xy=(0, 1), xycoords='axes fraction',
+        xytext=(+0.1, -0.1), textcoords='offset fontsize',
+        fontsize=fontsize, verticalalignment='top', fontfamily='serif')
 
     # saving as SVG and PNG
     if save:
@@ -1122,13 +1165,284 @@ def network_w_response(scenario,
         return psd_max
 
 
-def illustrative(model:sokm, amplitude=0.1, overwrite=True,y_0=None,node=0,plot_real_psd=False,save_dir=None, specific_name="scenario"):
+    
+
+def vtn_scenario_powers(t_final,scenario,model,absolute=False, save_dir=None, threshhold=1e-10,epsilon=None):
+    """
+    Plots the vtn of the powers of a given scenario for the on and off case in a format compatible with plot network_w_response. 
+    """
+    shift_matrix_obj=scenario[3][0]
+
+    fig, axes = plt.subplots(2, 1, figsize=(1.3, 1.4))
+    plt.subplots_adjust(hspace=0.1, wspace=0.05)
+
+    # fetching indices nodes where powers are applied based on the shift matrix
+    if type(shift_matrix_obj) is ShiftMatrix:
+        S=shift_matrix_obj.shift_matrix
+    else:
+        S=shift_matrix_obj
+    vtn_nodes= np.nonzero(np.any(np.abs(S) > threshhold, axis=1))[0]
+
+    # fetching trajectory data and fixpoint values
+    traj=generate_or_fetch_scenario_data(t_final, scenario, model, minus_fixpoint= True, save_dir=save_dir )
+        
+    t=traj["t"]
+    y_fixpoint=model.compute_fixed_point()
+    ys_shifted=traj["ys_shifted"][:len(y_fixpoint),:]
+
+    # compute shift power from that
+    p_vtn= (S@ys_shifted)[vtn_nodes,:]
+    p_vtn_average= np.cumsum(p_vtn,axis=1)[:,1:]/t[None,1:] #skipping first entry in order to avoid division by zero
+
+    # vtn_off
+    p_vtn_off= np.zeros_like(p_vtn_average)
+
+    if absolute:
+        p_vtn_average=np.abs(p_vtn_average)
+
+    if epsilon != None:
+        print(f"P_vtn prior epsilon: {np.max(p_vtn_average)}")
+        p_vtn_off=p_vtn_off/epsilon
+        p_vtn_average=p_vtn_average/epsilon
+        print(f"P_vtn post epsilon: {np.max(p_vtn_average)}")
+    # bess colors
+    #colors=["orange", "blue","green","red","darkblue"]
+    colors=[]
+    # plot
+    for bess_index in range(len(vtn_nodes)):
+        #axes.plot(t,p_vtn[bess_index], color=colors[bess_index],linewidth=0.5)
+        
+        axes[0].plot(t[1:],p_vtn_off[bess_index],color=colors[bess_index] if len(colors) > bess_index else "grey",linewidth=0.5, alpha=0.8)
+        axes[1].plot(t[1:],p_vtn_average[bess_index],color=colors[bess_index] if len(colors) > bess_index else "grey",linewidth=0.5, alpha=0.8)
+        #plt.plot(t,p_vtn[bess_index], color=colors[bess_index])
+        #plt.plot(t[1:],p_vtn_average[bess_index], linestyle="--",color=colors[bess_index])
+        #plt.show()
+
+    if absolute:
+        axes.set_yscale("log")
+    axes[0].set_xticks([])
+    axes[0].set_xlim(np.round((min(t),max(t))))
+    axes[1].set_xlabel(r"$t [s]$")
+    axes[1].set_xlim(np.round((min(t),max(t))))
+    if epsilon!=None:
+        axes[0].set_ylabel(r"$\frac{\overline{P}_{\mathrm{VTN}}}{\epsilon}$")
+        axes[1].set_ylabel(r"$\frac{\overline{P}_{\mathrm{VTN}}}{\epsilon}$")
+    else:
+        axes[0].set_ylabel(r"$\overline{P}_{\mathrm{VTN}}$")
+        axes[1].set_ylabel(r"$\overline{P}_{\mathrm{VTN}}$")
+
+    # saving
+    if save_dir is None:
+        save_dir = shift_matrix_obj.current_dir
+    specific_name= "cumsum_vtn_powers"
+    svg_path=save_figure(fig, save_dir=save_dir, name=specific_name+".svg")
+    png_path=os.path.join(save_dir,specific_name+".png")
+    svg2png(url=svg_path,write_to=png_path,
+                parent_height=110,parent_width=400,output_height=115*4,output_width=400*4)
+    return svg_path
+
+
+def individual_shift_scenarios(shift_matrix_obj, pert_amplitude, pert_node):
+    """
+    Helper function that generates a sine perturbation scenario for each individual shift matrix in shift_matrix_object.
+    """
+
+    # fetch individual shift matrices
+    individual_shift_matrices=shift_matrix_obj.cunstruct_individual_shift_matrices(in_eigenspace=False)
+
+    # collect original resonance frequencies prio to shift for perturbation
+    all_orig_freqs = model.predict_resonance_frequencies()
+    all_orig_freqs = all_orig_freqs[np.invert(np.isnan(all_orig_freqs))]
+
+    individual_scenarios=[]
+
+    # loop over individual shift matrices and create a scenario for ich with a sine perturbation corresponding to the eigenvalue shifted by the individual shift matrix
+    for i, ism in enumerate(individual_shift_matrices):
+        shift_args = (ism, model, None)
+        shift = (dynamics.jacobian_shift, shift_args)
+        pert = (dynamics.sine_perturbation_single_node, (pert_amplitude,all_orig_freqs[shift_matrix_obj.eigenvalue_indices[i]],pert_node))
+        individual_scenarios.append(pert+shift)
+    
+    return individual_scenarios
+
+
+def scenario_panel_recursive(model,
+                             scenario,
+                             t_final,
+                             steps=16000,
+                             color=orange, 
+                             save_dir=None, 
+                             specific_name="scenario_panel", 
+                             overwrite=True,
+                             node=0, 
+                             pert_node=1,
+                             labels=False,
+                             fontsize=10,
+                             plot_real_psd=False,
+                             amplitude=0.1,
+                             y_0=None,
+                             t_window=75,
+                             panel="a"
+                             ):
+
+    # allows for calling with a specific scenario, but also just with a shift matrix object
+    if isinstance(scenario, ShiftMatrix):
+        shift_matrix_obj=scenario
+        compose_shift_matrix_construction_visualization(shift_matrix_obj, log=True, absolute=True,fs=10, jac_color=darkblue,overwrite=overwrite)
+        scenario_provided=False
+        check_individual_shifts=True
+    else:
+        shift_matrix_obj=scenario[3][0]
+        if isinstance(shift_matrix_obj, ShiftMatrix):
+            compose_shift_matrix_construction_visualization(shift_matrix_obj, log=True, absolute=True,fs=10, jac_color=darkblue,overwrite=overwrite)
+            check_individual_shifts=True
+        else: # case of scenario with np array shift matrix instead of shift matrix object
+            check_individual_shifts = False
+        scenario_provided=True
+    
+    # check if individual scenarios need to be generated#
+    if check_individual_shifts:
+        if len(shift_matrix_obj.shifts)>1 or scenario_provided is False:
+
+            # generate individual shift scenarios, the corresponding colors
+            individual_scenarios= individual_shift_scenarios(shift_matrix_obj,amplitude,pert_node=pert_node)
+            scenario_colors=create_shift_colors(len(individual_scenarios))
+            for i in range(len(scenario_colors)):
+                scenario_colors[i][3]=1.
+
+            # common shift directory for all individual scenarios
+            if save_dir is None:
+                save_dir= shift_matrix_obj.current_dir
+
+            # iterate through them recursively
+            for i, individual_scenario in enumerate(individual_scenarios):
+                print(f"Now working on individual shift scenario {i}.")
+                scenario_panel_recursive(model,
+                                        individual_scenario,
+                                        t_final, 
+                                        steps=steps, 
+                                        save_dir=save_dir, 
+                                        specific_name=f"individual_shift_{i}",
+                                        overwrite=overwrite, 
+                                        node=node,
+                                        color=scenario_colors[i],
+                                        fontsize=fontsize,
+                                        plot_real_psd=plot_real_psd,
+                                        labels=labels,
+                                        panel=chr(97+i))
+
+    # plot scenario of the full shift matrix if provided
+    if scenario_provided:
+        fig, axes = plt.subplots(3, 2, figsize=(2.7, 2.1)) #, gridspec_kw={"width_ratios": [3, 3]})
+
+        traj=generate_or_fetch_scenario_data(t_final, scenario, model, y_0=y_0, steps=steps, meta_scenario_name=specific_name, save_dir=save_dir, overwrite=overwrite, minus_fixpoint= True)
+        vals=np.zeros((np.shape(model.jacobian_matrix)[0],steps+1))
+        vals=dynamics.sine_perturbation_single_node(traj["t"],vals[:,0],scenario[1])
+        # y lims for trajectory plot
+        print(np.shape(traj["ys"]), "is the shape and ",node, " the node in question")
+        mini=min(np.min(traj["ys"][node,:]),np.min(traj["ys_shifted"][node,:]))
+        maxi=max(np.max(traj["ys"][node,:]),np.max(traj["ys_shifted"][node,:]))
+        maxi+=(maxi-mini)*4
+        min_max=(1.2*mini,1.2*maxi)
+
+        network_w_response(scenario, 
+                        model, 
+                        t_final, 
+                        axes=axes[0,:],  
+                        color=color,
+                        only_perturbation=True, 
+                        y_0=y_0, 
+                        steps=steps, 
+                        scenario_name=specific_name, 
+                        overwrite=overwrite, 
+                        vtn_on=False, 
+                        node=node, 
+                        t_window=t_window,
+                        plot_real_psd=plot_real_psd,
+                        labels=labels,
+                        save_dir=save_dir,
+                        panel=panel)
+        psd_max=network_w_response(scenario, 
+                                model, 
+                                t_final, 
+                                axes=axes[1,:],   
+                                color=color,
+                                y_0=y_0, 
+                                steps=steps, 
+                                scenario_name=specific_name, 
+                                overwrite=overwrite, 
+                                vtn_on=False, 
+                                node=node, 
+                                t_window=t_window,
+                                min_max=min_max,
+                                plot_real_psd=plot_real_psd,
+                                labels=labels,
+                        save_dir=save_dir,
+                        panel=panel)
+        network_w_response(scenario, 
+                            model, 
+                            t_final, 
+                            axes=axes[2,:], 
+                            color=color,
+                            y_0=y_0, 
+                            steps=steps, 
+                            scenario_name=specific_name, 
+                            overwrite=overwrite, 
+                            vtn_on=True,
+                            psd_max=psd_max, 
+                            node=node, 
+                            t_window=t_window,
+                            min_max=min_max,
+                            plot_real_psd=plot_real_psd,
+                            labels=labels,
+                        save_dir=save_dir,
+                        panel=panel)
+        
+
+        axes[0,0].set_xticks([])
+        axes[0,1].set_xticks([])
+        axes[1,0].set_xticks([])
+        axes[1,1].set_xticks([])
+
+        # labels
+        print("Computing LaTex labels.")
+        axes[0,0].set_ylabel(r"$F_{k}$",fontsize=fontsize)
+        axes[1,0].set_ylabel(r"$\theta_l$",fontsize=fontsize)
+        axes[2,0].set_ylabel(r"$\theta_l$",fontsize=fontsize)
+        axes[0,1].set_ylabel(r"$\hat{F}_{k}$",fontsize=fontsize)
+        axes[0,1].yaxis.set_label_position("right")
+        axes[1,1].set_ylabel(r"$\mathrm{A}_l$",fontsize=fontsize)
+        axes[1,1].yaxis.set_label_position("right")
+        axes[2,1].set_ylabel(r"$\mathrm{A}_l$",fontsize=fontsize)
+        axes[2,1].yaxis.set_label_position("right")
+        axes[2,0].set_xlabel(r"$t [s]$",fontsize=fontsize)
+        axes[2,1].set_xlabel(r"$\omega$",fontsize=fontsize)
+        plt.subplots_adjust(hspace=0.1, wspace=0.05)
+
+        # saving the panel
+        if save_dir== None:
+            save_dir = shift_matrix_obj.current_dir
+        specific_name+=f"_node{node}_full_shift"
+        svg_path=save_figure(fig, save_dir=save_dir, name=specific_name+".svg")
+        png_path=os.path.join(save_dir,specific_name+".png")
+        svg2png(url=svg_path,write_to=png_path,
+                    parent_height=110,parent_width=400,output_height=115*4,output_width=400*4)
+        
+        vtn_scenario_powers(t_final,scenario,model,absolute=False,save_dir=save_dir,epsilon=amplitude)
+
+
+
+       
+                
+            
+
+def illustrative(model:sokm, amplitude=0.1, overwrite=True,y_0=None,node=0,plot_real_psd=False,save_dir=None, specific_name="scenario",fontsize=10,labels=False):
     scenarios= generate_sine_scenarios(model, amplitude=0.1, overwrite=False)
 
     scenario_colors=["purple","orange","gold"]
     for i,scenario in enumerate(scenarios):
         
-        fig, axes = plt.subplots(3, 2, figsize=(2.8, 1.5)) #, gridspec_kw={"width_ratios": [3, 3]})
+        fig, axes = plt.subplots(3, 2, figsize=(2.7, 2.1)) #, gridspec_kw={"width_ratios": [3, 3]})
 
         traj=generate_or_fetch_scenario_data(t_final, scenario, model, y_0=y_0, steps=steps, meta_scenario_name=meta_scenario_name, overwrite=overwrite, minus_fixpoint= True)
         vals=np.zeros((np.shape(model.jacobian_matrix)[0],steps+1))
@@ -1162,7 +1476,8 @@ def illustrative(model:sokm, amplitude=0.1, overwrite=True,y_0=None,node=0,plot_
                            vtn_on=False, 
                            node=node, 
                            t_traj=550,
-                           plot_real_psd=plot_real_psd)
+                           plot_real_psd=plot_real_psd,
+                           labels=labels)
         psd_max=network_w_response(scenario, 
                                    model, 
                                    t_final, 
@@ -1176,8 +1491,9 @@ def illustrative(model:sokm, amplitude=0.1, overwrite=True,y_0=None,node=0,plot_
                                    node=node, 
                                    t_traj=550,
                                    min_max=min_max,
-                                   plot_real_psd=plot_real_psd)
-        (network_w_response(scenario, 
+                                   plot_real_psd=plot_real_psd,
+                                   labels=labels)
+        network_w_response(scenario, 
                             model, 
                             t_final, 
                             axes=axes[2,:], 
@@ -1191,20 +1507,39 @@ def illustrative(model:sokm, amplitude=0.1, overwrite=True,y_0=None,node=0,plot_
                             node=node, 
                             t_traj=550,
                             min_max=min_max,
-                            plot_real_psd=plot_real_psd))
+                            plot_real_psd=plot_real_psd,
+                            labels=labels)
         
+
         axes[0,0].set_xticks([])
         axes[0,1].set_xticks([])
         axes[1,0].set_xticks([])
         axes[1,1].set_xticks([])
+
+        # labels
+        print("Computing LaTex labels.")
+        axes[0,0].set_ylabel(r"$F_{k} [\frac{\mathrm{rad}}{s^{-2}}]$",fontsize=fontsize)
+        axes[1,0].set_ylabel(r"$\theta_l [\mathrm{rad}]$",fontsize=fontsize)
+        axes[2,0].set_ylabel(r"$\theta_l [\mathrm{rad}]$",fontsize=fontsize)
+        axes[0,1].set_ylabel(r"$S_{k} [\frac{s^{-2}}{\mathrm{Hz}}]$",fontsize=fontsize)
+        axes[0,1].yaxis.set_label_position("right")
+        axes[1,1].set_ylabel(r"$\mathrm{A}_l$",fontsize=fontsize)
+        axes[1,1].yaxis.set_label_position("right")
+        axes[2,1].set_ylabel(r"$\mathrm{A}_l$",fontsize=fontsize)
+        axes[2,1].yaxis.set_label_position("right")
+        axes[2,0].set_xlabel(r"$t [s]$",fontsize=fontsize)
+        axes[2,1].set_xlabel(r"$\omega [\mathrm{rad}/s]$",fontsize=fontsize)
         plt.subplots_adjust(hspace=0.1, wspace=0.05)
 
         shift_matrix_obj = scenario[3][0]
         save_dir = shift_matrix_obj.current_dir
+        specific_name+=f"_node{node}"
         svg_path=save_figure(fig, save_dir=save_dir, name=specific_name+".svg")
         png_path=os.path.join(save_dir,specific_name+".png")
         svg2png(url=svg_path,write_to=png_path,
                     parent_height=110,parent_width=400,output_height=115*4,output_width=400*4)
+        
+        vtn_scenario_powers(t_final,scenario,model,absolute=False)
 
 
 
@@ -1218,19 +1553,19 @@ if __name__ == "__main__":
     #model.summary()
     #model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\Instance_2026-05-11_17-20-36")
     #model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\Instance_2026-06-02_16-36-00")
-    model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\Instance_2026-06-03_15-42-09")
+    #model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\Instance_2026-06-03_15-42-09")
+    model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\Instance_2026-06-11_12-56-31")
 
     # Generate a shift matrix
-    if False:
-        shift_matrix_obj = ShiftMatrix(model=model)
-        eigenvalue_indices = [ 2,3]
-        shifts = np.array([-0.3,0.3],dtype=float)
-        #zero_rows = np.array([5,6,7],dtype=int)
-        zero_rows=np.arange(77, dtype=int)
-        zero_cols = np.array([],dtype=int)
-        shift_matrix_obj.construct_from_scratch(eigenvalue_indices, shifts, zero_rows, zero_cols)
+    shift_matrix_obj = ShiftMatrix(model=model)
+    eigenvalue_indices = [ 2,3]
+    shifts = np.array([-0.3,0.5],dtype=float)
+    #zero_rows = np.array([5,6,7],dtype=int)
+    zero_rows=np.arange(5, dtype=int)
+    zero_cols = np.array([],dtype=int)
+    shift_matrix_obj.construct_from_scratch(eigenvalue_indices, shifts, zero_rows, zero_cols)
     #shift_matrix_obj= ShiftMatrix.load_from_file("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\Instance_2026-03-31_10-32-17\\shift_matrix.json")
-    
+    print("type is Shift matrix:", isinstance(shift_matrix_obj, ShiftMatrix))
     #resonance_plot(model,log=True, show_resonance_location=True)
     #pre_and_post_shift_comparison_subplots(model, shift_matrix_obj)
     
@@ -1238,7 +1573,7 @@ if __name__ == "__main__":
 
     #compose_shift_matrix_construction_visualization(shift_matrix_obj, log=True, absolute=True,fs=8, jac_color=black)
     perturbed_node=5
-    t_final=600
+    t_final=950
     steps=16000
     meta_scenario_name="sine_scenario"
     #angle_comparison(model, shift_matrix_obj)
@@ -1260,7 +1595,21 @@ if __name__ == "__main__":
                                     )
 
     #scenarios = generate_scenarios(model, noise_type="sine", perturbation_strength=0.1, frequency_samples=400 , steps=steps, overwrite=True)
-    illustrative(model, amplitude=0.1, overwrite=False, node=3, plot_real_psd=False)
+    #illustrative(model, amplitude=0.1, overwrite=False, node=4, plot_real_psd=False, labels=False)
+    scenario_panel_recursive(model,
+                             shift_matrix_obj,
+                             t_final,
+                             steps=steps,
+                             color=orange, 
+                             save_dir=None, 
+                             specific_name="scenario_panel", 
+                             overwrite=False,
+                             node=5, 
+                             pert_node=1,
+                             labels=False,
+                             fontsize=10,
+                             plot_real_psd=False
+                             )
     # noise or driving, what is the difference?
     # ways forward: 
     # write integrator yourself ( but if I mess it up, that will be very shitty)

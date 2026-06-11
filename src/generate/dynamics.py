@@ -14,6 +14,7 @@ from scipy.integrate import solve_ivp
 from scipy.integrate import ode
 import matplotlib.pyplot as plt
 import os
+from shift_matrix import ShiftMatrix
 
 
 """ 
@@ -335,12 +336,15 @@ def jacobian_shift(t,y,args):
         The computed shift value based on the current state vector and the provided shift matrix, ensuring that the fixed point remains unchanged.
     """
 
-    shift_matrix_obj, model, offset =args
+    S, model, offset =args
 
     if offset is None:
         offset=np.zeros_like(model.fixed_point)
+    
+    if type(S) is ShiftMatrix:
+        S=S.shift_matrix
 
-    y_dot= shift_matrix_obj.shift_matrix @ (y[:len(model.fixed_point)]-model.fixed_point+offset)
+    y_dot= S @ (y[:len(model.fixed_point)]-model.fixed_point+offset)
 
     return np.concatenate(( np.zeros(len(y)-len(y_dot)),y_dot))
 
