@@ -330,6 +330,26 @@ def plot_network(
         node_color=node_colors
 
     plot_vtn = type(shift_matrix_obj) is ShiftMatrix or type(shift_matrix_obj) is np.ndarray
+    
+
+    # Draw the base graph
+    #if labels:
+        #labels = np.arange(np.shape(model.connectivity_matrix)[0])
+    nx.draw(
+        G,
+        pos,
+        ax=ax,
+        with_labels=labels,
+        node_size=node_size,
+        node_color=node_color,
+        font_size=fs,
+        font_color="black",
+        edge_color=edge_colors,
+        width=edge_widths,
+        linewidths=2,
+        alpha=1.,  # Base opacity for edges
+    )
+
     # Drawing vtn edges if a shift matrix obj or shift matrix are provided
     if plot_vtn:
         
@@ -359,24 +379,6 @@ def plot_network(
                         alpha=1.,
                         linewidth=np.average(edge_widths)
                     )
-
-    # Draw the base graph
-    #if labels:
-        #labels = np.arange(np.shape(model.connectivity_matrix)[0])
-    nx.draw(
-        G,
-        pos,
-        ax=ax,
-        with_labels=labels,
-        node_size=node_size,
-        node_color=node_color,
-        font_size=fs,
-        font_color="black",
-        edge_color=edge_colors,
-        width=edge_widths,
-        linewidths=2,
-        alpha=1.,  # Base opacity for edges
-    )
 
     # Highlight vtn nodes if provided
     if plot_vtn:
@@ -1084,7 +1086,6 @@ def network_w_response(scenario,
         )
 
     # plot trajectory for one selected node
-    
     t_traj_index=np.abs(t - t_final + t_window).argmin() # find t closest to t_traj bases on steps
     if color is None:
         color=orange
@@ -1130,13 +1131,14 @@ def network_w_response(scenario,
         label_offset=2
     elif only_perturbation is False and vtn_on:
         label_offset=4
-    axes[0].annotate(
-        panel+f"{str(1+label_offset)})",
+    
+    label_1=panel+f"{str(1+label_offset)})"
+    axes[0].annotate(rf"$\mathrm{{{label_1}}}$",
         xy=(0, 1), xycoords='axes fraction',
         xytext=(+0.1, -0.1), textcoords='offset fontsize',
         fontsize=fontsize, verticalalignment='top', fontfamily='serif')
-    axes[1].annotate(
-        panel+f"{str(2+label_offset)})",
+    label_2=panel+f"{str(2+label_offset)})"
+    axes[1].annotate(rf"$\mathrm{{{label_2}}}$",
         xy=(0, 1), xycoords='axes fraction',
         xytext=(+0.1, -0.1), textcoords='offset fontsize',
         fontsize=fontsize, verticalalignment='top', fontfamily='serif')
@@ -1167,7 +1169,7 @@ def network_w_response(scenario,
 
     
 
-def vtn_scenario_powers(t_final,scenario,model,absolute=False, save_dir=None, threshhold=1e-10,epsilon=None):
+def vtn_scenario_powers(t_final,scenario,model,absolute=False, save_dir=None, threshhold=1e-10,epsilon=None,specific_name="shift",fontsize=10):
     """
     Plots the vtn of the powers of a given scenario for the on and off case in a format compatible with plot network_w_response. 
     """
@@ -1201,10 +1203,8 @@ def vtn_scenario_powers(t_final,scenario,model,absolute=False, save_dir=None, th
         p_vtn_average=np.abs(p_vtn_average)
 
     if epsilon != None:
-        print(f"P_vtn prior epsilon: {np.max(p_vtn_average)}")
         p_vtn_off=p_vtn_off/epsilon
         p_vtn_average=p_vtn_average/epsilon
-        print(f"P_vtn post epsilon: {np.max(p_vtn_average)}")
     # bess colors
     #colors=["orange", "blue","green","red","darkblue"]
     colors=[]
@@ -1222,19 +1222,30 @@ def vtn_scenario_powers(t_final,scenario,model,absolute=False, save_dir=None, th
         axes.set_yscale("log")
     axes[0].set_xticks([])
     axes[0].set_xlim(np.round((min(t),max(t))))
-    axes[1].set_xlabel(r"$t [s]$")
+    axes[1].set_xlabel(r"$t$")
     axes[1].set_xlim(np.round((min(t),max(t))))
     if epsilon!=None:
-        axes[0].set_ylabel(r"$\frac{\overline{P}_{\mathrm{VTN}}}{\epsilon}$")
-        axes[1].set_ylabel(r"$\frac{\overline{P}_{\mathrm{VTN}}}{\epsilon}$")
+        axes[0].set_ylabel(r"$\overline{P}_{\mathrm{VTN}}/{\epsilon}$")
+        axes[1].set_ylabel(r"$\overline{P}_{\mathrm{VTN}}/{\epsilon}$")
     else:
         axes[0].set_ylabel(r"$\overline{P}_{\mathrm{VTN}}$")
         axes[1].set_ylabel(r"$\overline{P}_{\mathrm{VTN}}$")
 
+    axes[0].annotate(
+        r"$\mathrm{a2)}$",
+        xy=(0, 1), xycoords='axes fraction',
+        xytext=(+0.1, -0.1), textcoords='offset fontsize',
+        fontsize=fontsize, verticalalignment='top', fontfamily='serif')
+    axes[1].annotate(
+        r"$\mathrm{a3)}$",
+        xy=(0, 1), xycoords='axes fraction',
+        xytext=(+0.1, -0.1), textcoords='offset fontsize',
+        fontsize=fontsize, verticalalignment='top', fontfamily='serif')
+
     # saving
     if save_dir is None:
         save_dir = shift_matrix_obj.current_dir
-    specific_name= "cumsum_vtn_powers"
+    specific_name+= "cumsum_vtn_powers"
     svg_path=save_figure(fig, save_dir=save_dir, name=specific_name+".svg")
     png_path=os.path.join(save_dir,specific_name+".png")
     svg2png(url=svg_path,write_to=png_path,
@@ -1281,10 +1292,9 @@ def scenario_panel_recursive(model,
                              plot_real_psd=False,
                              amplitude=0.1,
                              y_0=None,
-                             t_window=75,
+                             t_window=50,
                              panel="a"
                              ):
-
     # allows for calling with a specific scenario, but also just with a shift matrix object
     if isinstance(scenario, ShiftMatrix):
         shift_matrix_obj=scenario
@@ -1329,7 +1339,8 @@ def scenario_panel_recursive(model,
                                         fontsize=fontsize,
                                         plot_real_psd=plot_real_psd,
                                         labels=labels,
-                                        panel=chr(97+i))
+                                        panel=chr(98+i),
+                                        t_window=t_window)
 
     # plot scenario of the full shift matrix if provided
     if scenario_provided:
@@ -1415,20 +1426,21 @@ def scenario_panel_recursive(model,
         axes[1,1].yaxis.set_label_position("right")
         axes[2,1].set_ylabel(r"$\mathrm{A}_l$",fontsize=fontsize)
         axes[2,1].yaxis.set_label_position("right")
-        axes[2,0].set_xlabel(r"$t [s]$",fontsize=fontsize)
+        axes[2,0].set_xlabel(r"$t$",fontsize=fontsize)
         axes[2,1].set_xlabel(r"$\omega$",fontsize=fontsize)
         plt.subplots_adjust(hspace=0.1, wspace=0.05)
 
         # saving the panel
         if save_dir== None:
             save_dir = shift_matrix_obj.current_dir
+        power_plot_name=specific_name
         specific_name+=f"_node{node}_full_shift"
         svg_path=save_figure(fig, save_dir=save_dir, name=specific_name+".svg")
         png_path=os.path.join(save_dir,specific_name+".png")
         svg2png(url=svg_path,write_to=png_path,
                     parent_height=110,parent_width=400,output_height=115*4,output_width=400*4)
         
-        vtn_scenario_powers(t_final,scenario,model,absolute=False,save_dir=save_dir,epsilon=amplitude)
+        vtn_scenario_powers(t_final,scenario,model,absolute=False,save_dir=save_dir,epsilon=amplitude,specific_name=power_plot_name,fontsize=fontsize)
 
 
 
@@ -1486,7 +1498,7 @@ def illustrative(model:sokm, amplitude=0.1, overwrite=True,y_0=None,node=0,plot_
                                    y_0=y_0, 
                                    steps=steps, 
                                    scenario_name=meta_scenario_name, 
-                                   overwrite=overwrite, 
+                                   overwrite=False, 
                                    vtn_on=False, 
                                    node=node, 
                                    t_traj=550,
@@ -1501,7 +1513,7 @@ def illustrative(model:sokm, amplitude=0.1, overwrite=True,y_0=None,node=0,plot_
                             y_0=y_0, 
                             steps=steps, 
                             scenario_name=meta_scenario_name, 
-                            overwrite=overwrite, 
+                            overwrite=False, 
                             vtn_on=True,
                             psd_max=psd_max, 
                             node=node, 
@@ -1518,17 +1530,17 @@ def illustrative(model:sokm, amplitude=0.1, overwrite=True,y_0=None,node=0,plot_
 
         # labels
         print("Computing LaTex labels.")
-        axes[0,0].set_ylabel(r"$F_{k} [\frac{\mathrm{rad}}{s^{-2}}]$",fontsize=fontsize)
-        axes[1,0].set_ylabel(r"$\theta_l [\mathrm{rad}]$",fontsize=fontsize)
-        axes[2,0].set_ylabel(r"$\theta_l [\mathrm{rad}]$",fontsize=fontsize)
-        axes[0,1].set_ylabel(r"$S_{k} [\frac{s^{-2}}{\mathrm{Hz}}]$",fontsize=fontsize)
+        axes[0,0].set_ylabel(r"$F_{k} $",fontsize=fontsize)
+        axes[1,0].set_ylabel(r"$\theta_l $",fontsize=fontsize)
+        axes[2,0].set_ylabel(r"$\theta_l $",fontsize=fontsize)
+        axes[0,1].set_ylabel(r"$S_{k}$",fontsize=fontsize)
         axes[0,1].yaxis.set_label_position("right")
         axes[1,1].set_ylabel(r"$\mathrm{A}_l$",fontsize=fontsize)
         axes[1,1].yaxis.set_label_position("right")
         axes[2,1].set_ylabel(r"$\mathrm{A}_l$",fontsize=fontsize)
         axes[2,1].yaxis.set_label_position("right")
-        axes[2,0].set_xlabel(r"$t [s]$",fontsize=fontsize)
-        axes[2,1].set_xlabel(r"$\omega [\mathrm{rad}/s]$",fontsize=fontsize)
+        axes[2,0].set_xlabel(r"$t$",fontsize=fontsize)
+        axes[2,1].set_xlabel(r"$\omega$",fontsize=fontsize)
         plt.subplots_adjust(hspace=0.1, wspace=0.05)
 
         shift_matrix_obj = scenario[3][0]
@@ -1547,6 +1559,7 @@ def illustrative(model:sokm, amplitude=0.1, overwrite=True,y_0=None,node=0,plot_
 if __name__ == "__main__":
     
     # Create a model and compute the Jacobian
+    #model = sokm.illustrative_8node()
     #model = sokm.from_random_sparse_graph(num_nodes=8, edge_probability=0.1, damping_coefficient=0.01)
     #model = sokm.from_soft_random_geometric_graph(num_nodes=8, radius=0.3, damping_coefficient=0.01)
     #model.compute_jacobian()
@@ -1554,14 +1567,18 @@ if __name__ == "__main__":
     #model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\Instance_2026-05-11_17-20-36")
     #model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\Instance_2026-06-02_16-36-00")
     #model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\Instance_2026-06-03_15-42-09")
-    model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\Instance_2026-06-11_12-56-31")
+    #model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\Instance_2026-06-11_12-56-31")
+    #model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\8node")
+    model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\Moritz_vals")
 
     # Generate a shift matrix
     shift_matrix_obj = ShiftMatrix(model=model)
-    eigenvalue_indices = [ 2,3]
-    shifts = np.array([-0.3,0.5],dtype=float)
+    eigenvalue_indices = [ 2,5]
+    shifts = np.array([-2.5,-1.5],dtype=float)
+    #shifts = np.array([-2.5,-2.5],dtype=float)
     #zero_rows = np.array([5,6,7],dtype=int)
-    zero_rows=np.arange(5, dtype=int)
+    #zero_rows=np.arange(5, dtype=int)
+    zero_rows=np.array([1,2,3,4,5])
     zero_cols = np.array([],dtype=int)
     shift_matrix_obj.construct_from_scratch(eigenvalue_indices, shifts, zero_rows, zero_cols)
     #shift_matrix_obj= ShiftMatrix.load_from_file("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\Instance_2026-03-31_10-32-17\\shift_matrix.json")
@@ -1573,7 +1590,7 @@ if __name__ == "__main__":
 
     #compose_shift_matrix_construction_visualization(shift_matrix_obj, log=True, absolute=True,fs=8, jac_color=black)
     perturbed_node=5
-    t_final=950
+    t_final=750
     steps=16000
     meta_scenario_name="sine_scenario"
     #angle_comparison(model, shift_matrix_obj)
@@ -1604,8 +1621,9 @@ if __name__ == "__main__":
                              save_dir=None, 
                              specific_name="scenario_panel", 
                              overwrite=False,
-                             node=5, 
-                             pert_node=1,
+                             node=3, 
+                             t_window=20,
+                             pert_node=perturbed_node,
                              labels=False,
                              fontsize=10,
                              plot_real_psd=False

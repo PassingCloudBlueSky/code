@@ -326,7 +326,7 @@ def visualize_matrix(left_vec=None,
         return save_figure(fig, save_dir=save_dir, name=name if name is not None else "pcolormesh.svg")
 
 
-def shift_matrix_construction_visualization_subplots(shift_matrix_obj:ShiftMatrix, in_eigenspace=False, log=True, absolute=False, fs=8, cutoff=1e-4, jac_color=darkblue):
+def shift_matrix_construction_visualization_subplots(shift_matrix_obj:ShiftMatrix, in_eigenspace=False, log=True, absolute=False, fs=8, cutoff=1e-4, jac_color=darkblue, node_reference = False):
     """
     Helper function to create the subplots for the composed figure visualizing the construction of the shift matrix by plotting the Jacobian, 
     the individual shift components, and everything layered on top of each other as individual SVGs. 
@@ -421,7 +421,7 @@ def shift_matrix_construction_visualization_subplots(shift_matrix_obj:ShiftMatri
         saving_paths.append(visualize_matrix(left_vec=left_generators[index], right_vec=right_generators[index],label=labels, color=shift_colors[index], log=log, fs=fs, cutoff=cutoff, name=f"{"eigenspace" if in_eigenspace else "physical"}_shift_component_{index+1}.svg", save_dir=save_dir, min_max=min_max))
 
     # add row numbers to layered plot
-    if in_eigenspace is False and dim <=10:
+    if node_reference and (in_eigenspace is False) and dim <=10:
         
         labels=[]
         for i in range(dim):
@@ -543,7 +543,7 @@ def compose_shift_matrix_construction_visualization(shift_matrix_obj:ShiftMatrix
             fig.append([reference])
         
         # space label
-        space=sg.TextElement(10,y_0+57, "Physical space" if second_row else "Eigenspace", size=6)
+        space=sg.TextElement(10,y_0+57, "Physical space$" if second_row else "Eigenspace", size=6)
         space.rotate(270, 10, y_0+57)
         fig.append([space])
 

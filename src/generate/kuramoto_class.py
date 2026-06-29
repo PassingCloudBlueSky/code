@@ -134,7 +134,22 @@ class SecondOrderKuramotoModel(BaseModel):
 
         return cls(K, p, damping_coefficient)
 
-    
+    @classmethod
+    def illustrative_8node(cls):
+        a=0.1 # 1/s^^-2  # for Xiaozhu a=1
+        K= 16*np.array([
+                     [0,0,1,0,1,0,0,0],
+                     [0,0,0,0,1,0,0,1],
+                     [1,0,0,0,0,1,1,1],
+                     [0,0,0,0,0,0,1,0],
+                     [1,1,0,0,0,0,0,0],
+                     [0,0,1,0,0,0,1,1],
+                     [0,0,1,1,0,1,0,0],
+                     [0,1,1,0,0,1,0,0]]) # pre-factor 100 in case of Xiaozhu
+        p = 1*np.array([-1,-1,-1,-1,3,-1,3,-1]) # pre-factor 10 in case of Xiaozhu
+
+        return cls(K, p, a)
+
     
     @classmethod
     def from_soft_random_geometric_graph(
@@ -239,6 +254,7 @@ class SecondOrderKuramotoModel(BaseModel):
             self.compute_fixed_point() #before this was just a print message saying that it should be computed which did not lead the debugger to flag none
         K = self.connectivity_matrix
         theta_star = self.fixed_point
+        
         L = K * np.cos(theta_star[:, None] - theta_star[None, :])
         L -= np.diag(np.sum(L, axis=0))
         self.jacobian_matrix = L
