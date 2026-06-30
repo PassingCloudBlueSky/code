@@ -4,6 +4,7 @@ from plot_utils import *
 from typing import Optional
 import matplotlib.pyplot as plt
 from matplotlib import colors
+from matplotlib.ticker import FuncFormatter
 from matplotlib.colors import ListedColormap, Normalize, LinearSegmentedColormap
 plt.rcParams['text.usetex'] = True
 """
@@ -1096,7 +1097,8 @@ def network_w_response(scenario,
     else:
         upper=-3*min_max[0]
     axes[0].set_ylim(min_max)
-    axes[0].set_yticks(np.round(min_max if only_perturbation else (min_max[0],upper),decimals=1))
+
+    axes[0].set_yticks(np.round(min_max if only_perturbation else (0.,min_max[1]),decimals=1))
     axes[0].set_xticks(np.round((np.min(t[t_traj_index:]),np.max(t[t_traj_index:]))))
 
     
@@ -1118,13 +1120,18 @@ def network_w_response(scenario,
         response_vals=model.calculate_response_amplitudes(omega,S=S,k=pert_node)
         axes[1].plot(omega, response_vals[node], color="black",linewidth=linewidth)
         axes[1].set_ylim((np.min(response_vals[node]),10*np.max(response_vals[node])))
-    axes[1].set_xlim(min(omega),max(omega))
+    axes[1].set_xlim(min(omega),max(omega))    
+    axes[1].set_yscale("log")
+    axes[1].yaxis.tick_right()
+    if not only_perturbation:
+        axes[1].set_ylim(1e-2,1e0)
+        axes[1].set_yticks([1e-2,1e0])
+    else:
+        axes[1].set_yticks([1e-2,1e0])
     if plot_real_psd:
         axes[1].set_ylim((1e-10,10*np.max(response_vals[node])))
-    axes[1].set_yscale("log")
     
     axes[1].add_patch(rect)
-    axes[1].yaxis.tick_right()
 
     label_offset=0
     if only_perturbation is False and vtn_on is False:
@@ -1175,8 +1182,9 @@ def vtn_scenario_powers(t_final,scenario,model,absolute=False, save_dir=None, th
     """
     shift_matrix_obj=scenario[3][0]
 
-    fig, axes = plt.subplots(2, 1, figsize=(1.3, 1.4))
-    plt.subplots_adjust(hspace=0.1, wspace=0.05)
+    fig, axes = plt.subplots(3, 1, figsize=(1.4, 2.6)) 
+    axes[0].set_axis_off()
+    plt.subplots_adjust(hspace=0.25, wspace=0.05)
 
     # fetching indices nodes where powers are applied based on the shift matrix
     if type(shift_matrix_obj) is ShiftMatrix:
@@ -1202,9 +1210,9 @@ def vtn_scenario_powers(t_final,scenario,model,absolute=False, save_dir=None, th
     if absolute:
         p_vtn_average=np.abs(p_vtn_average)
 
-    if epsilon != None:
-        p_vtn_off=p_vtn_off/epsilon
-        p_vtn_average=p_vtn_average/epsilon
+    p_i=np.max(model.power_vector)
+    p_vtn_off=p_vtn_off/p_i
+    p_vtn_average=p_vtn_average/p_i
     # bess colors
     #colors=["orange", "blue","green","red","darkblue"]
     colors=[]
@@ -1212,31 +1220,36 @@ def vtn_scenario_powers(t_final,scenario,model,absolute=False, save_dir=None, th
     for bess_index in range(len(vtn_nodes)):
         #axes.plot(t,p_vtn[bess_index], color=colors[bess_index],linewidth=0.5)
         
-        axes[0].plot(t[1:],p_vtn_off[bess_index],color=colors[bess_index] if len(colors) > bess_index else "grey",linewidth=0.5, alpha=0.8)
-        axes[1].plot(t[1:],p_vtn_average[bess_index],color=colors[bess_index] if len(colors) > bess_index else "grey",linewidth=0.5, alpha=0.8)
+        axes[1].plot(t[1:],p_vtn_off[bess_index],color=colors[bess_index] if len(colors) > bess_index else "grey",linewidth=0.5, alpha=0.8)
+        axes[2].plot(t[1:],p_vtn_average[bess_index],color=colors[bess_index] if len(colors) > bess_index else "grey",linewidth=0.5, alpha=0.8)
         #plt.plot(t,p_vtn[bess_index], color=colors[bess_index])
         #plt.plot(t[1:],p_vtn_average[bess_index], linestyle="--",color=colors[bess_index])
         #plt.show()
 
     if absolute:
         axes.set_yscale("log")
-    axes[0].set_xticks([])
-    axes[0].set_xlim(np.round((min(t),max(t))))
-    axes[1].set_xlabel(r"$t$")
+    axes[1].set_xticks([])
     axes[1].set_xlim(np.round((min(t),max(t))))
-    if epsilon!=None:
-        axes[0].set_ylabel(r"$\overline{P}_{\mathrm{VTN}}/{\epsilon}$")
-        axes[1].set_ylabel(r"$\overline{P}_{\mathrm{VTN}}/{\epsilon}$")
-    else:
-        axes[0].set_ylabel(r"$\overline{P}_{\mathrm{VTN}}$")
-        axes[1].set_ylabel(r"$\overline{P}_{\mathrm{VTN}}$")
+    axes[2].set_xlabel(r"$t$")
+    axes[2].set_xlim(np.round((min(t),max(t))))
 
-    axes[0].annotate(
+    # y_axis labeling
+    y_lims=np.round(np.array([np.min(p_vtn_average),np.max(p_vtn_average)]),decimals=3)
+    axes[1].set_ylim(y_lims)
+    axes[2].set_ylim(y_lims)
+    y_vals=np.append(y_lims,0.)
+    y_ticks=[rf"${{{val}}}\%$" for val in np.round(y_vals*100,decimals=2)]
+    axes[1].set_yticks(y_vals,labels=y_ticks)
+    axes[2].set_yticks(y_vals,labels=y_ticks)
+    axes[1].set_ylabel(r"$\overline{P}_{\mathrm{s}}/{P_{\mathrm{max}}}$")
+    axes[2].set_ylabel(r"$\overline{P}_{\mathrm{s}}/{P_{\mathrm{max}}}$")
+
+    axes[1].annotate(
         r"$\mathrm{a2)}$",
         xy=(0, 1), xycoords='axes fraction',
         xytext=(+0.1, -0.1), textcoords='offset fontsize',
         fontsize=fontsize, verticalalignment='top', fontfamily='serif')
-    axes[1].annotate(
+    axes[2].annotate(
         r"$\mathrm{a3)}$",
         xy=(0, 1), xycoords='axes fraction',
         xytext=(+0.1, -0.1), textcoords='offset fontsize',
@@ -1344,7 +1357,7 @@ def scenario_panel_recursive(model,
 
     # plot scenario of the full shift matrix if provided
     if scenario_provided:
-        fig, axes = plt.subplots(3, 2, figsize=(2.7, 2.1)) #, gridspec_kw={"width_ratios": [3, 3]})
+        fig, axes = plt.subplots(3, 2, figsize=(3., 2.6)) #, gridspec_kw={"width_ratios": [3, 3]}) ehem. (2.7,2.1)
 
         traj=generate_or_fetch_scenario_data(t_final, scenario, model, y_0=y_0, steps=steps, meta_scenario_name=specific_name, save_dir=save_dir, overwrite=overwrite, minus_fixpoint= True)
         vals=np.zeros((np.shape(model.jacobian_matrix)[0],steps+1))
@@ -1417,18 +1430,19 @@ def scenario_panel_recursive(model,
 
         # labels
         print("Computing LaTex labels.")
-        axes[0,0].set_ylabel(r"$F_{k}$",fontsize=fontsize)
-        axes[1,0].set_ylabel(r"$\theta_l$",fontsize=fontsize)
-        axes[2,0].set_ylabel(r"$\theta_l$",fontsize=fontsize)
-        axes[0,1].set_ylabel(r"$\hat{F}_{k}$",fontsize=fontsize)
+        axes[0,0].set_ylabel(r"$g_{k}$",fontsize=fontsize,labelpad=0.1)
+        axes[1,0].set_ylabel(r"$\Delta\theta_l$",fontsize=fontsize)
+        axes[2,0].set_ylabel(r"$\Delta\theta_l$",fontsize=fontsize)
+        axes[0,1].set_ylabel(r"$\hat{g}_{k}$",fontsize=fontsize)
         axes[0,1].yaxis.set_label_position("right")
         axes[1,1].set_ylabel(r"$\mathrm{A}_l$",fontsize=fontsize)
         axes[1,1].yaxis.set_label_position("right")
         axes[2,1].set_ylabel(r"$\mathrm{A}_l$",fontsize=fontsize)
         axes[2,1].yaxis.set_label_position("right")
+        #axes[2,1].xaxis.label.set_position((0.5, 1.1))
         axes[2,0].set_xlabel(r"$t$",fontsize=fontsize)
         axes[2,1].set_xlabel(r"$\omega$",fontsize=fontsize)
-        plt.subplots_adjust(hspace=0.1, wspace=0.05)
+        plt.subplots_adjust(hspace=0.25, wspace=0.05)
 
         # saving the panel
         if save_dir== None:
@@ -1621,7 +1635,7 @@ if __name__ == "__main__":
                              save_dir=None, 
                              specific_name="scenario_panel", 
                              overwrite=False,
-                             node=3, 
+                             node=1, 
                              t_window=20,
                              pert_node=perturbed_node,
                              labels=False,
