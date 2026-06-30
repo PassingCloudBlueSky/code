@@ -9,11 +9,13 @@ import black
 import matplotlib.pyplot as plt
 from matplotlib import colors
 from matplotlib.colors import ListedColormap, Normalize, LinearSegmentedColormap
-"""
 plt.rcParams['text.usetex'] = True
+"""
+
 plt.rcParams['font.family'] = 'serif'  # Use LaTeX's default serif font
 plt.rcParams['text.latex.preamble'] = r'\\usepackage{amsmath}'  # Optional: Add LaTeX packages
 """
+#from networkx.drawing.nx_pylab import _FontSize
 import numpy as np
 from base_model import BaseModel
 from kuramoto_class import SecondOrderKuramotoModel as sokm 
@@ -215,7 +217,7 @@ def visualize_matrix(left_vec=None,
                      cutoff=1e-5,
                      axs=None,
                      fs=20,
-                     label=["left vec", "right vec", "matrix"]):
+                     label=["left vec", "right vec", "matrix","a)"]):
     """
     Visualize the outer product of two vectors left_vec and right_vec, along with the vectors themselves if left_vec and right_vec are provided.
     If matrix is provded, it visualizes only the matrix provided. The color scale can be adjusted with min_max and color. Save_dir and name can be provided to save the figure.
@@ -279,13 +281,13 @@ def visualize_matrix(left_vec=None,
 
     # generating figure to plot into if no axes for layering onto has been provided
     if axs is None:
-        fig, axes = plt.subplots(2,2, width_ratios=(1, dim), height_ratios=( 1,dim), figsize=(1, 1), gridspec_kw=dict(hspace=1/dim, wspace=1/dim))
+        fig, axes = plt.subplots(2,2, width_ratios=(1, dim), height_ratios=( 1,dim), figsize=(1.5, 1.5), gridspec_kw=dict(hspace=1/dim, wspace=1/dim))
     else:
         axes=axs
 
     # add matrix plot
     im=add_pcolormesh(axes[1,1], matrix, color=color, min_max=min_max, log=log, absolute=absolute, cutoff=cutoff)
-    axes[1,1].set_xlabel(label[2] if len(label)==3 else label,fontsize=fs)
+    axes[1,1].set_xlabel(label[2],fontsize=fs)
 
     # add generating vextor plots if they have been provided as parameters
     if left_vec is not None and right_vec is not None:
@@ -308,7 +310,13 @@ def visualize_matrix(left_vec=None,
         axes[0,1].set_title(" ",fontsize=fs)
         axes[1,0].axis('off')
         axes[1,0].set_ylabel(" ",fontsize=fs)
+        if name is not None and axs is None:
+            if "eigenspace" in name:
+                fig.suptitle(r"eigenspace:",fontsize=fs,color="dimgrey")
+            elif "physical" in name:
+                fig.suptitle(r"physical space:",fontsize=fs,color="dimgrey")
     axes[0,0].axis('off')
+    axes[1,1].annotate(rf"$\mathrm{{{label[3]}}}$", (-1.5, 8.5), fontsize=fs, annotation_clip=False)
 
     # Add colorbar
     cbar_ax = fig.add_axes((0.95, 0.11, 0.05, 0.77))
@@ -326,7 +334,7 @@ def visualize_matrix(left_vec=None,
         return save_figure(fig, save_dir=save_dir, name=name if name is not None else "pcolormesh.svg")
 
 
-def shift_matrix_construction_visualization_subplots(shift_matrix_obj:ShiftMatrix, in_eigenspace=False, log=True, absolute=False, fs=8, cutoff=1e-4, jac_color=darkblue, node_reference = False):
+def shift_matrix_construction_visualization_subplots(shift_matrix_obj:ShiftMatrix, in_eigenspace=False, log=True, absolute=False, fs=10, cutoff=1e-4, jac_color=darkblue, node_reference = False):
     """
     Helper function to create the subplots for the composed figure visualizing the construction of the shift matrix by plotting the Jacobian, 
     the individual shift components, and everything layered on top of each other as individual SVGs. 
@@ -357,10 +365,12 @@ def shift_matrix_construction_visualization_subplots(shift_matrix_obj:ShiftMatri
     # checking prerequisites
     if shift_matrix_obj.shift_matrix is None:
         raise ValueError("Shift matrix has to be constructed beforehand to be visualized.")
+    
 
     # Extract data from the ShiftMatrix object
     left_generators, right_generators = shift_matrix_obj.calculate_shift_matrix_generators(in_eigenspace=in_eigenspace)
     individual_shift_matrices= shift_matrix_obj.cunstruct_individual_shift_matrices(in_eigenspace=in_eigenspace)
+    n_individual_shift_matrices=len(individual_shift_matrices)
     if in_eigenspace:
         jacobian= np.diag(shift_matrix_obj.eigenvalues)
     else:
@@ -383,7 +393,7 @@ def shift_matrix_construction_visualization_subplots(shift_matrix_obj:ShiftMatri
     min_max = (global_min_val, global_max_val)
 
     # create plot instances to accumulate the layers of each visualization step for log and physical space
-    fig_layered, axes_layered = plt.subplots(2,2, width_ratios=(1, dim), height_ratios=( 1,dim), figsize=(1, 1), gridspec_kw=dict(hspace=1/dim, wspace=1/dim))
+    fig_layered, axes_layered = plt.subplots(2,2, width_ratios=(1, dim), height_ratios=( 1,dim), figsize=(1.5, 1.5), gridspec_kw=dict(hspace=1/dim, wspace=1/dim))
     axes_layered[0,1].set_title(" ",fontsize=fs)
     axes_layered[1,0].set_ylabel(" ",fontsize=fs)
     axes_layered[0,1].axis('off')
@@ -391,32 +401,47 @@ def shift_matrix_construction_visualization_subplots(shift_matrix_obj:ShiftMatri
     axes_layered[0,0].axis('off')
     if in_eigenspace:
         axes_layered[1,1].set_xlabel(r"$V(J+\sum_{i}\vec{p}_{i}\vec{q}_i^T)V^{-1}$", fontsize=fs)
+        panel_label=rf"{chr(97+n_individual_shift_matrices+2)})"
+        
     else:
         axes_layered[1,1].set_xlabel(r"$J+\sum_{i}\vec{p}_{i}\vec{q}_i^T$", fontsize=fs)
-
+        panel_label=rf"{chr(97+n_individual_shift_matrices+1)})"
+    axes_layered[1,1].annotate(rf"$\mathrm{{{panel_label}}}$", (-1.5, 8.5), fontsize=fs, annotation_clip=False)
 
     # create empty list of saving_paths
     saving_paths=[]
 
     # Visualize jacobian in eigenspace and physical space
     add_pcolormesh(axes_layered[1,1],jacobian, color=jac_color, log=log, absolute=absolute, cutoff=cutoff, min_max=min_max)
-    saving_paths.append(visualize_matrix(matrix=jacobian, label=r"$VJV^{-1}$" if in_eigenspace else r"$ J $", color=jac_color, log=log, absolute=absolute, fs=fs, cutoff=cutoff, name=f"{"eigenspace" if in_eigenspace else "physical"}_jacobian.svg", save_dir=save_dir, min_max=min_max) )
+
+    if in_eigenspace:
+        labels=[None,None,r"$VJV^{-1}$",rf"{chr(97+n_individual_shift_matrices+2)})"]
+    else:
+        labels=[None,None,r"$J$",rf"{chr(97)})"]
+    saving_paths.append(visualize_matrix(matrix=jacobian, label=labels, color=jac_color, log=log, absolute=absolute, fs=fs, cutoff=cutoff, name=f"{"eigenspace" if in_eigenspace else "physical"}_jacobian.svg", save_dir=save_dir, min_max=min_max) )
     
 
     # looping over individual shift matrices to visualize their construction one by one
-    n_individual_shift_matrices=len(individual_shift_matrices)
+    
     shift_colors=create_shift_colors(n_individual_shift_matrices) 
 
     for index in range(n_individual_shift_matrices):
         print(f"Visualizing shift component {index+1} in {'eigen' if in_eigenspace else 'physical'} space...")
         
+
         # generating labels for subfigures
         p="p"
         q="q"
         if in_eigenspace:
-            labels = [rf"$V\vec{{{p}}}_{{{index+1}}}$", rf"$\vec{{{q}}}_{{{index+1}}}^TV^{{{-1}}}$", f"$V\\vec{{{p}}}_{{{index+1}}}\\vec{{{q}}}_{{{index+1}}}^TV^{{{-1}}}$"]
+            labels = [rf"$V\vec{{{p}}}_{{{index+1}}}$",
+                       rf"$\vec{{{q}}}_{{{index+1}}}^TV^{{{-1}}}$",
+                         f"$V\\vec{{{p}}}_{{{index+1}}}\\vec{{{q}}}_{{{index+1}}}^TV^{{{-1}}}$",
+                         rf"{chr(100+n_individual_shift_matrices+index)})"]
         else:
-            labels = [rf"$\vec{{{p}}}_{{{index+1}}}$", rf"$\vec{{{q}}}_{{{index+1}}}^T$", f"$\\vec{{{p}}}_{{{index+1}}}\\vec{{{q}}}_{{{index+1}}}^T$"]
+            labels = [rf"$\vec{{{p}}}_{{{index+1}}}$", 
+                      rf"$\vec{{{q}}}_{{{index+1}}}^T$", 
+                      f"$\\vec{{{p}}}_{{{index+1}}}\\vec{{{q}}}_{{{index+1}}}^T$",
+                      rf"{chr(98+index)})"]
         add_pcolormesh(axes_layered[1,1], individual_shift_matrices[index], color=shift_colors[index], log=log, absolute=absolute, cutoff=cutoff, min_max=min_max)
         saving_paths.append(visualize_matrix(left_vec=left_generators[index], right_vec=right_generators[index],label=labels, color=shift_colors[index], log=log, fs=fs, cutoff=cutoff, name=f"{"eigenspace" if in_eigenspace else "physical"}_shift_component_{index+1}.svg", save_dir=save_dir, min_max=min_max))
 
@@ -477,7 +502,7 @@ def compose_shift_matrix_construction_visualization(shift_matrix_obj:ShiftMatrix
     file_paths_eigenspace=shift_matrix_construction_visualization_subplots(shift_matrix_obj, in_eigenspace=True, log=log, absolute=absolute, fs=fs, cutoff=1e-4, jac_color=jac_color)
     
     #create new SVG figure
-    fig = sg.SVGFigure("17cm", "6.5cm")
+    fig = sg.SVGFigure("3.25in","6.5in") #("17cm", "6.5cm")
     #fig.append(sc.Grid(10,10)) # visual grid for ease of aligning figures
 
     # helper function to loop over, load and add all the generated SVGs to the figure, with appropriate positioning and scaling
@@ -563,6 +588,118 @@ def compose_shift_matrix_construction_visualization(shift_matrix_obj:ShiftMatrix
             parent_height=150,parent_width=70*len(file_paths_eigenspace),output_height=1500,output_width=700*len(file_paths_eigenspace))
     return save_dir
 
+
+def compose_shift_matrix_construction_visualization_vertical(shift_matrix_obj:ShiftMatrix, log=True, absolute=True,fs=10, jac_color=darkblue, overwrite=False, equation_mode=False):
+    """
+    Compose a comprehensive visualization of the shift matrix construction process.
+    This function generates a side-by-side comparison of the shift matrix construction
+    in both eigenspace and physical space, combining multiple subplot visualizations
+    into a single SVG figure with labeled stages and operators. The combined visualization is saved in both SVG
+    and PNG formats in the plots subdirectory.
+    ----------
+    shift_matrix_obj : ShiftMatrix
+        The shift matrix object containing construction data and output directory information.
+    log : bool, optional
+        If True, apply logarithmic scaling to the visualizations. Default is True.
+    absolute : bool, optional
+        If True, display absolute values and log False, display absolute values on linear scale.
+    fs : int, optional
+        Font size for the plots. Default is 8.
+    jac_color : str, optional
+        Color for the Jacobian matrix visualization. Default is darkblue.
+    overwrite : bool, optional
+        If True, overwrite existing files. Default is False.
+    -------
+    save_dir : str
+        Path to the saved combined SVG file (plots\\combined.svg).
+    """
+
+    # checking overwrite
+    save_dir=os.path.join(shift_matrix_obj.current_dir,"combined.svg")
+    if overwrite is False and os.path.isfile(save_dir):
+        return save_dir
+
+    # generate the subfigures based on the properties of shift_matrix_obj
+    file_paths_physical=shift_matrix_construction_visualization_subplots(shift_matrix_obj, in_eigenspace=False, log=log, absolute=absolute, fs=fs, cutoff=1e-4, jac_color=jac_color)
+    file_paths_eigenspace=shift_matrix_construction_visualization_subplots(shift_matrix_obj, in_eigenspace=True, log=log, absolute=absolute, fs=fs, cutoff=1e-4, jac_color=jac_color)
+    
+    #create new SVG figure
+    fig = sg.SVGFigure("3.25in","6.5in") #("17cm", "6.5cm")
+    #fig.append(sc.Grid(20,20)) # visual grid for ease of aligning figures
+
+    v_spacing= 140 if equation_mode else 120
+
+    # helper function to loop over, load and add all the generated SVGs to the figure, with appropriate positioning and scaling
+    def add_svg_column_to_figure(fig,file_paths, second_column=False, equation_mode=False):
+        """
+        Helper function to line up the construction process of a shifted jacobian either in the eigenspace (second_row=False) or physical space (True).
+        
+        Parameters
+        --------
+        fig: svgutils Figure
+            Object onto which the svg files are appended.
+        file_paths: list of strings
+            List of the paths to the svg files of the construction process. Starting with the jacobian, the individual shift matrices and ending with the layered figure.
+        second_colum: boolean
+            Indicates current column of cunstruction.
+            False: eigenspace
+            True: physical space
+
+        Returns
+        --------
+        save_dir: string
+            Path to the finishes SVG file.
+        
+        """
+
+        # vertical offset of row
+        x_0 = 140 if second_column else 0
+
+        # list to store "+"/"=" sign figures such that they can be appended to fi in the end and are layered on top of the other svgs, are not covered by them
+        symbols=[]
+
+        v_spacing= 140 if equation_mode else 120
+        #looping over the individual SVGs
+        for i,path in enumerate(file_paths):
+
+            
+
+            # vertical offset of objects to append
+            y_0 = i*v_spacing
+
+            # appending and positioning the svg figure of the current loop
+            fig_part = sg.fromfile(path)
+            plot = fig_part.getroot()
+
+            if  i==len(file_paths)-1:
+                y_0 -= 20
+            plot.moveto(x_0 + 15 if i==0 or i==len(file_paths)-1 else x_0, y_0, scale_x=1., scale_y=1.)
+            fig.append([plot])
+
+            if equation_mode:
+                # generating and appending +/= signs to illustrate the narrative between the figures
+                if i<len(file_paths)-2:
+                    plus=sg.TextElement(67+x_0,y_0+133,"+",size=10)
+                    symbols.append(plus)
+                elif i==len(file_paths)-2:
+                    equal=sg.TextElement(67+x_0,y_0+133,"=",size=10)
+                    symbols.append(equal)
+        
+        # append +/= symbols on top of everything else
+        fig.append(symbols)
+    
+    add_svg_column_to_figure(fig, file_paths_eigenspace, second_column=True)
+    add_svg_column_to_figure(fig, file_paths_physical, second_column=False)
+
+    # dividing line between the spaces
+    line=sc.Line([(140,0),(140,v_spacing*(len(file_paths_physical))-20)],width=0.8)
+    fig.append([line])
+
+    fig.save(save_dir)
+    png_path=os.path.join(shift_matrix_obj.current_dir,"combined.png")
+    svg2png(url=save_dir,write_to=png_path,
+            parent_height=140*len(file_paths_eigenspace)-20,parent_width=280,output_height=140*len(file_paths_eigenspace)-20,output_width=280)
+    return save_dir
 
 def plot_dynamics(t_final,
                     y_0,
@@ -1338,47 +1475,23 @@ def plot_vtn_powers(axes, traj, shift_matrix_obj:ShiftMatrix, model: sokm, thres
 # Example usage
 if __name__ == "__main__":
     
-    # Create a model and compute the Jacobian
-    dim=8
-    model = sokm.from_random_sparse_graph(num_nodes=dim, edge_probability=0.3, damping_coefficient=0.01)
-    #model.compute_jacobian()
-    #model.summary()
-    #model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\Instance_2026-04-07_11-21-27")
-
-    # Create a ShiftMatrix object
-    shift_matrix_obj = ShiftMatrix(model=model)
+    model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\Moritz_vals")
 
     # Generate a shift matrix
-    eigenvalue_indices = [ 2,3]
-    shifts = np.array([-0.6, 0.3])
-    zero_rows = np.array([3,4,5,6,7])
-    #zero_rows=np.arange(16)
-
-    
+    shift_matrix_obj = ShiftMatrix(model=model)
+    eigenvalue_indices = [ 2,5]
+    shifts = np.array([-2.5,-1.5],dtype=float)
+    #shifts = np.array([-2.5,-2.5],dtype=float)
+    #zero_rows = np.array([5,6,7],dtype=int)
+    #zero_rows=np.arange(5, dtype=int)
+    zero_rows=np.array([1,2,3,4,5])
     zero_cols = np.array([],dtype=int)
     shift_matrix_obj.construct_from_scratch(eigenvalue_indices, shifts, zero_rows, zero_cols)
-    
-
-    delta=1e-1
-    offset=np.random.rand(dim)*delta
-    offset-=np.sum(offset)/80
-    fixpoint=model.compute_fixed_point()
-    y_0=np.concatenate((fixpoint,np.zeros(dim)))
-    print("y_0 dim: ",len(y_0))
-    #eigenvalues, eigenvectors = la.eigh(model.jacobian_matrix)
-    #print(eigenvalues)
-    node_index=1
-    amplitude= delta
-    frequency=0.1
-    pert_args=amplitude, frequency, node_index 
-    pert=(dynamics.sine_perturbation_single_node,pert_args)
-    shift_args= shift_matrix_obj, model, None
-    shift=(dynamics.jacobian_shift,shift_args)
-    #shift=(None,None)
-    #plot_dynamics(600,y_0,args=(model.model_ode,None)+pert+shift)
-    plot_dynamics_scenario(t_final=600,args=(None,None)+shift, model=model, y_0=None, steps=5000, offset_strength=0.1,meta_scenario_name= "none")
+    #shift_matrix_obj= ShiftMatrix.load_from_file("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\Instance_2026-03-31_10-32-17\\shift_matrix.json")
+    print("type is Shift matrix:", isinstance(shift_matrix_obj, ShiftMatrix))
     #resonance_plot(model,log=True, show_resonance_location=True)
     #pre_and_post_shift_comparison_subplots(model, shift_matrix_obj)
+    compose_shift_matrix_construction_visualization_vertical(shift_matrix_obj, log=True, absolute=True,fs=10, jac_color=darkblue,overwrite=True)
     
 
 

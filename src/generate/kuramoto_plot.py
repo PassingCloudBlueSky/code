@@ -1311,13 +1311,13 @@ def scenario_panel_recursive(model,
     # allows for calling with a specific scenario, but also just with a shift matrix object
     if isinstance(scenario, ShiftMatrix):
         shift_matrix_obj=scenario
-        compose_shift_matrix_construction_visualization(shift_matrix_obj, log=True, absolute=True,fs=10, jac_color=darkblue,overwrite=overwrite)
+        compose_shift_matrix_construction_visualization_vertical(shift_matrix_obj, log=True, absolute=True,fs=10, jac_color=darkblue,overwrite=overwrite)
         scenario_provided=False
         check_individual_shifts=True
     else:
         shift_matrix_obj=scenario[3][0]
         if isinstance(shift_matrix_obj, ShiftMatrix):
-            compose_shift_matrix_construction_visualization(shift_matrix_obj, log=True, absolute=True,fs=10, jac_color=darkblue,overwrite=overwrite)
+            compose_shift_matrix_construction_visualization_vertical(shift_matrix_obj, log=True, absolute=True,fs=10, jac_color=darkblue,overwrite=overwrite)
             check_individual_shifts=True
         else: # case of scenario with np array shift matrix instead of shift matrix object
             check_individual_shifts = False
