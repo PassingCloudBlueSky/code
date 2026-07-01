@@ -136,7 +136,7 @@ class SecondOrderKuramotoModel(BaseModel):
 
     @classmethod
     def illustrative_8node(cls):
-        a=0.1 # 1/s^^-2  # for Xiaozhu a=1
+        a=0.01 # 1/s^^-2  # for Xiaozhu a=1
         K= 16*np.array([
                      [0,0,1,0,1,0,0,0],
                      [0,0,0,0,1,0,0,1],

@@ -217,7 +217,8 @@ def visualize_matrix(left_vec=None,
                      cutoff=1e-5,
                      axs=None,
                      fs=20,
-                     label=["left vec", "right vec", "matrix","a)"]):
+                     label=["left vec", "right vec", "matrix","a)"],
+                     size=(1.5, 1.5)):
     """
     Visualize the outer product of two vectors left_vec and right_vec, along with the vectors themselves if left_vec and right_vec are provided.
     If matrix is provded, it visualizes only the matrix provided. The color scale can be adjusted with min_max and color. Save_dir and name can be provided to save the figure.
@@ -281,7 +282,7 @@ def visualize_matrix(left_vec=None,
 
     # generating figure to plot into if no axes for layering onto has been provided
     if axs is None:
-        fig, axes = plt.subplots(2,2, width_ratios=(1, dim), height_ratios=( 1,dim), figsize=(1.5, 1.5), gridspec_kw=dict(hspace=1/dim, wspace=1/dim))
+        fig, axes = plt.subplots(2,2, width_ratios=(1, dim), height_ratios=( 1,dim), figsize=size, gridspec_kw=dict(hspace=1/dim, wspace=1/dim))
     else:
         axes=axs
 
@@ -310,13 +311,13 @@ def visualize_matrix(left_vec=None,
         axes[0,1].set_title(" ",fontsize=fs)
         axes[1,0].axis('off')
         axes[1,0].set_ylabel(" ",fontsize=fs)
-        if name is not None and axs is None:
+        if name is not None and axs is None and size[0]>1.:
             if "eigenspace" in name:
                 fig.suptitle(r"eigenspace:",fontsize=fs,color="dimgrey")
             elif "physical" in name:
                 fig.suptitle(r"physical space:",fontsize=fs,color="dimgrey")
     axes[0,0].axis('off')
-    axes[1,1].annotate(rf"$\mathrm{{{label[3]}}}$", (-1.5, 8.5), fontsize=fs, annotation_clip=False)
+    axes[1,1].annotate(rf"$\mathrm{{{label[3]}}}$", (-1.7, 8.6), fontsize=fs, annotation_clip=False)
 
     # Add colorbar
     cbar_ax = fig.add_axes((0.95, 0.11, 0.05, 0.77))
@@ -334,7 +335,7 @@ def visualize_matrix(left_vec=None,
         return save_figure(fig, save_dir=save_dir, name=name if name is not None else "pcolormesh.svg")
 
 
-def shift_matrix_construction_visualization_subplots(shift_matrix_obj:ShiftMatrix, in_eigenspace=False, log=True, absolute=False, fs=10, cutoff=1e-4, jac_color=darkblue, node_reference = False):
+def shift_matrix_construction_visualization_subplots(shift_matrix_obj:ShiftMatrix, in_eigenspace=False, log=True, absolute=False, fs=10, cutoff=1e-4, jac_color=darkblue, node_reference = False, size=(1.5, 1.5)):
     """
     Helper function to create the subplots for the composed figure visualizing the construction of the shift matrix by plotting the Jacobian, 
     the individual shift components, and everything layered on top of each other as individual SVGs. 
@@ -393,7 +394,7 @@ def shift_matrix_construction_visualization_subplots(shift_matrix_obj:ShiftMatri
     min_max = (global_min_val, global_max_val)
 
     # create plot instances to accumulate the layers of each visualization step for log and physical space
-    fig_layered, axes_layered = plt.subplots(2,2, width_ratios=(1, dim), height_ratios=( 1,dim), figsize=(1.5, 1.5), gridspec_kw=dict(hspace=1/dim, wspace=1/dim))
+    fig_layered, axes_layered = plt.subplots(2,2, width_ratios=(1, dim), height_ratios=( 1,dim), figsize=size, gridspec_kw=dict(hspace=1/dim, wspace=1/dim))
     axes_layered[0,1].set_title(" ",fontsize=fs)
     axes_layered[1,0].set_ylabel(" ",fontsize=fs)
     axes_layered[0,1].axis('off')
@@ -401,7 +402,7 @@ def shift_matrix_construction_visualization_subplots(shift_matrix_obj:ShiftMatri
     axes_layered[0,0].axis('off')
     if in_eigenspace:
         axes_layered[1,1].set_xlabel(r"$V(J+\sum_{i}\vec{p}_{i}\vec{q}_i^T)V^{-1}$", fontsize=fs)
-        panel_label=rf"{chr(97+n_individual_shift_matrices+2)})"
+        panel_label=rf"{chr(97+2*n_individual_shift_matrices+3)})"
         
     else:
         axes_layered[1,1].set_xlabel(r"$J+\sum_{i}\vec{p}_{i}\vec{q}_i^T$", fontsize=fs)
@@ -418,7 +419,7 @@ def shift_matrix_construction_visualization_subplots(shift_matrix_obj:ShiftMatri
         labels=[None,None,r"$VJV^{-1}$",rf"{chr(97+n_individual_shift_matrices+2)})"]
     else:
         labels=[None,None,r"$J$",rf"{chr(97)})"]
-    saving_paths.append(visualize_matrix(matrix=jacobian, label=labels, color=jac_color, log=log, absolute=absolute, fs=fs, cutoff=cutoff, name=f"{"eigenspace" if in_eigenspace else "physical"}_jacobian.svg", save_dir=save_dir, min_max=min_max) )
+    saving_paths.append(visualize_matrix(matrix=jacobian, label=labels, color=jac_color, log=log, absolute=absolute, fs=fs, cutoff=cutoff, name=f"{"eigenspace" if in_eigenspace else "physical"}_jacobian.svg", save_dir=save_dir, min_max=min_max, size=size))
     
 
     # looping over individual shift matrices to visualize their construction one by one
@@ -443,7 +444,7 @@ def shift_matrix_construction_visualization_subplots(shift_matrix_obj:ShiftMatri
                       f"$\\vec{{{p}}}_{{{index+1}}}\\vec{{{q}}}_{{{index+1}}}^T$",
                       rf"{chr(98+index)})"]
         add_pcolormesh(axes_layered[1,1], individual_shift_matrices[index], color=shift_colors[index], log=log, absolute=absolute, cutoff=cutoff, min_max=min_max)
-        saving_paths.append(visualize_matrix(left_vec=left_generators[index], right_vec=right_generators[index],label=labels, color=shift_colors[index], log=log, fs=fs, cutoff=cutoff, name=f"{"eigenspace" if in_eigenspace else "physical"}_shift_component_{index+1}.svg", save_dir=save_dir, min_max=min_max))
+        saving_paths.append(visualize_matrix(left_vec=left_generators[index], right_vec=right_generators[index],label=labels, color=shift_colors[index], log=log, fs=fs, cutoff=cutoff, name=f"{"eigenspace" if in_eigenspace else "physical"}_shift_component_{index+1}.svg", save_dir=save_dir, min_max=min_max,size=size))
 
     # add row numbers to layered plot
     if node_reference and (in_eigenspace is False) and dim <=10:
@@ -467,7 +468,7 @@ def shift_matrix_construction_visualization_subplots(shift_matrix_obj:ShiftMatri
 
 
 
-def compose_shift_matrix_construction_visualization(shift_matrix_obj:ShiftMatrix, log=True, absolute=True,fs=8, jac_color=darkblue, overwrite=False):
+def compose_shift_matrix_construction_visualization_horizontal(shift_matrix_obj:ShiftMatrix, log=True, absolute=True,fs=8, jac_color=darkblue, overwrite=False):
     """
     Compose a comprehensive visualization of the shift matrix construction process.
     This function generates a side-by-side comparison of the shift matrix construction
@@ -493,17 +494,17 @@ def compose_shift_matrix_construction_visualization(shift_matrix_obj:ShiftMatrix
     """
 
     # checking overwrite
-    save_dir=os.path.join(shift_matrix_obj.current_dir,"combined.svg")
+    save_dir=os.path.join(shift_matrix_obj.current_dir,"combined_horizontal.svg")
     if overwrite is False and os.path.isfile(save_dir):
         return save_dir
 
     # generate the subfigures based on the properties of shift_matrix_obj
-    file_paths_physical=shift_matrix_construction_visualization_subplots(shift_matrix_obj, in_eigenspace=False, log=log, absolute=absolute, fs=fs, cutoff=1e-4, jac_color=jac_color)
-    file_paths_eigenspace=shift_matrix_construction_visualization_subplots(shift_matrix_obj, in_eigenspace=True, log=log, absolute=absolute, fs=fs, cutoff=1e-4, jac_color=jac_color)
+    file_paths_physical=shift_matrix_construction_visualization_subplots(shift_matrix_obj, in_eigenspace=False, log=log, absolute=absolute, fs=fs, cutoff=1e-4, jac_color=jac_color, size=(0.85,0.85))
+    file_paths_eigenspace=shift_matrix_construction_visualization_subplots(shift_matrix_obj, in_eigenspace=True, log=log, absolute=absolute, fs=fs, cutoff=1e-4, jac_color=jac_color, size=(0.85,0.85))
     
     #create new SVG figure
-    fig = sg.SVGFigure("3.25in","6.5in") #("17cm", "6.5cm")
-    #fig.append(sc.Grid(10,10)) # visual grid for ease of aligning figures
+    fig = sg.SVGFigure("3.5in","1.8in") #("17cm", "6.5cm")
+    #fig.append(sc.Grid(20,20)) # visual grid for ease of aligning figures
 
     # helper function to loop over, load and add all the generated SVGs to the figure, with appropriate positioning and scaling
     def add_svg_row_to_figure(fig,file_paths, second_row=False):
@@ -529,23 +530,25 @@ def compose_shift_matrix_construction_visualization(shift_matrix_obj:ShiftMatrix
         """
 
         # vertical offset of row
-        y_0 = 70 if second_row else 10
+        y_0 = 84 if second_row else 0
 
         # list to store "+"/"=" sign figures such that they can be appended to fi in the end and are layered on top of the other svgs, are not covered by them
         symbols=[]
 
         #looping over the individual SVGs
+        x_0=0
         for i,path in enumerate(file_paths):
 
             # horizontal offset of objects to append
-            x_0 = i*70
-            if i==0:
-                x_0 += 10
+            if i>0:
+                x_0 = i*80 - 10
+            if i==len(file_paths)-1:
+                x_0 = i*80  
 
             # appending and positioning the svg figure of the current loop
             fig_part = sg.fromfile(path)
             plot = fig_part.getroot()
-            plot.moveto(x_0, y_0, scale_x=0.6, scale_y=0.6)
+            plot.moveto(x_0, y_0, scale_x=1., scale_y=1.)
             fig.append([plot])
 
             # plotting the subfigure reference for the caption, with a bit of extra space for the first and last plot for coherent aesthetics
@@ -553,39 +556,32 @@ def compose_shift_matrix_construction_visualization(shift_matrix_obj:ShiftMatrix
                 x_0 -= 10
             elif i==0:
                 x_0 -=8
-
-            # generating and appending referencing label of the subfigure
-            reference_offset=len(file_paths)+1 if second_row else 1
-            reference=sg.TextElement(x_0+5,y_0+10, chr(ord('`')+i+reference_offset+4)+")", size=6)
-
-            # generating and appending +/= signs to illustrate the narrative between the figures
-            if i<len(file_paths)-2:
-                plus=sg.TextElement(x_0+65,y_0+32,"+",size=6)
-                symbols.append(plus)
-            elif i==len(file_paths)-2:
-                equal=sg.TextElement(x_0+65,y_0+32,"=",size=6)
-                symbols.append(equal)
-            fig.append([reference])
+            
+            if False:
+                # generating and appending +/= signs to illustrate the narrative between the figures
+                if i<len(file_paths)-2:
+                    plus=sg.TextElement(x_0+65,y_0+32,"+",size=6)
+                    symbols.append(plus)
+                elif i==len(file_paths)-2:
+                    equal=sg.TextElement(x_0+65,y_0+32,"=",size=6)
+                    symbols.append(equal)
+                
         
-        # space label
-        space=sg.TextElement(10,y_0+57, "Physical space$" if second_row else "Eigenspace", size=6)
-        space.rotate(270, 10, y_0+57)
-        fig.append([space])
 
         # append +/= symbols on top of everything else
         fig.append(symbols)
     
-    add_svg_row_to_figure(fig, file_paths_eigenspace, second_row=False)
-    add_svg_row_to_figure(fig, file_paths_physical, second_row=True)
+    add_svg_row_to_figure(fig, file_paths_eigenspace, second_row=True)
+    add_svg_row_to_figure(fig, file_paths_physical, second_row=False)
 
     # dividing line between the spaces
-    line=sc.Line([(5,70),(45+70*(len(file_paths_physical)-1),70)],width=0.8)
+    line=sc.Line([(0,87),(80*(len(file_paths_physical))-5,87)],width=0.8)
     fig.append([line])
 
     fig.save(save_dir)
-    png_path=os.path.join(shift_matrix_obj.current_dir,"combined.png")
+    png_path=os.path.join(shift_matrix_obj.current_dir,"combined_horizontal.png")
     svg2png(url=save_dir,write_to=png_path,
-            parent_height=150,parent_width=70*len(file_paths_eigenspace),output_height=1500,output_width=700*len(file_paths_eigenspace))
+            parent_height=170,parent_width=80*len(file_paths_eigenspace)-5,output_height=170,output_width=80*len(file_paths_eigenspace)-5)
     return save_dir
 
 
@@ -615,7 +611,7 @@ def compose_shift_matrix_construction_visualization_vertical(shift_matrix_obj:Sh
     """
 
     # checking overwrite
-    save_dir=os.path.join(shift_matrix_obj.current_dir,"combined.svg")
+    save_dir=os.path.join(shift_matrix_obj.current_dir,"combined_vertical.svg")
     if overwrite is False and os.path.isfile(save_dir):
         return save_dir
 
@@ -696,7 +692,7 @@ def compose_shift_matrix_construction_visualization_vertical(shift_matrix_obj:Sh
     fig.append([line])
 
     fig.save(save_dir)
-    png_path=os.path.join(shift_matrix_obj.current_dir,"combined.png")
+    png_path=os.path.join(shift_matrix_obj.current_dir,"combined_vertical.png")
     svg2png(url=save_dir,write_to=png_path,
             parent_height=140*len(file_paths_eigenspace)-20,parent_width=280,output_height=140*len(file_paths_eigenspace)-20,output_width=280)
     return save_dir
@@ -1492,6 +1488,7 @@ if __name__ == "__main__":
     #resonance_plot(model,log=True, show_resonance_location=True)
     #pre_and_post_shift_comparison_subplots(model, shift_matrix_obj)
     compose_shift_matrix_construction_visualization_vertical(shift_matrix_obj, log=True, absolute=True,fs=10, jac_color=darkblue,overwrite=True)
+    compose_shift_matrix_construction_visualization_horizontal(shift_matrix_obj, log=True, absolute=True,fs=10, jac_color=darkblue,overwrite=True)
     
 
 

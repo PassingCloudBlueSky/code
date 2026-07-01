@@ -1057,6 +1057,7 @@ def network_w_response(scenario,
         #response_amplitude = np.max(psd, axis=1)
         if psd_max is None:
             psd_max= np.max(response_amplitude)
+
         if cmap=="RdYBlu_r":
             response_amplitude = response_amplitude / (2*psd_max)+0.5 # Normalize to [0.5,1.]
             node_colors = plt.cm.RdYlBu_r(response_amplitude)
@@ -1306,7 +1307,8 @@ def scenario_panel_recursive(model,
                              amplitude=0.1,
                              y_0=None,
                              t_window=50,
-                             panel="a"
+                             panel="a",
+                             cmap="coolwarm"
                              ):
     # allows for calling with a specific scenario, but also just with a shift matrix object
     if isinstance(scenario, ShiftMatrix):
@@ -1385,7 +1387,8 @@ def scenario_panel_recursive(model,
                         plot_real_psd=plot_real_psd,
                         labels=labels,
                         save_dir=save_dir,
-                        panel=panel)
+                        panel=panel,
+                        cmap=cmap)
         psd_max=network_w_response(scenario, 
                                 model, 
                                 t_final, 
@@ -1402,7 +1405,8 @@ def scenario_panel_recursive(model,
                                 plot_real_psd=plot_real_psd,
                                 labels=labels,
                         save_dir=save_dir,
-                        panel=panel)
+                        panel=panel,
+                        cmap=cmap)
         network_w_response(scenario, 
                             model, 
                             t_final, 
@@ -1420,7 +1424,8 @@ def scenario_panel_recursive(model,
                             plot_real_psd=plot_real_psd,
                             labels=labels,
                         save_dir=save_dir,
-                        panel=panel)
+                        panel=panel,
+                        cmap=cmap)
         
 
         axes[0,0].set_xticks([])
@@ -1573,7 +1578,7 @@ def illustrative(model:sokm, amplitude=0.1, overwrite=True,y_0=None,node=0,plot_
 if __name__ == "__main__":
     
     # Create a model and compute the Jacobian
-    #model = sokm.illustrative_8node()
+    model = sokm.illustrative_8node()
     #model = sokm.from_random_sparse_graph(num_nodes=8, edge_probability=0.1, damping_coefficient=0.01)
     #model = sokm.from_soft_random_geometric_graph(num_nodes=8, radius=0.3, damping_coefficient=0.01)
     #model.compute_jacobian()
@@ -1583,7 +1588,7 @@ if __name__ == "__main__":
     #model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\Instance_2026-06-03_15-42-09")
     #model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\Instance_2026-06-11_12-56-31")
     #model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\8node")
-    model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\Moritz_vals")
+    #model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\Moritz_vals")
 
     # Generate a shift matrix
     shift_matrix_obj = ShiftMatrix(model=model)
