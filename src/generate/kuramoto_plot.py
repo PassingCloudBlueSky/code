@@ -1013,7 +1013,7 @@ def network_w_response(scenario,
                        t_window=200,
                        save_dir=None, 
                        linewidth=1.,
-                       psd_max=None,
+                       response_max=None,
                        plot_real_psd=True,
                        cmap= "coolwarm",
                        axes=None,
@@ -1029,6 +1029,11 @@ def network_w_response(scenario,
     if axes is None:
         save = True
         fig, axes = plt.subplots(1, 2, figsize=(2.8, 0.6), gridspec_kw={"width_ratios": [3, 3]})
+    
+    if color.ndim>1:
+        scenario_color=blend_colors(color,mode="plt")
+    else:
+        scenario_color=color
 
     # calculate trajectories
     traj=generate_or_fetch_scenario_data(t_final, scenario, model, y_0=y_0, steps=steps, meta_scenario_name=scenario_name, save_dir=save_dir, overwrite=overwrite, minus_fixpoint= True)
@@ -1046,23 +1051,32 @@ def network_w_response(scenario,
     t_traj_index=np.abs(t - t_final + t_window).argmin() 
     freqs, psd = compute_psd_from_traj(t[t_traj_index:], vals[:,t_traj_index:]) 
     freqs =2*np.pi*freqs # converting to omega
+
+
+
     # plotting network
     if not only_perturbation:
-        # multiply with perturbation psd to get color coding of nodes according to their response to the driving signal, or just np.max
         ax_network = axes[0].inset_axes([0.2, 0.2, 0.6, 0.75])
-        idx = np.argmin(np.abs(freqs - pert_freq)) #finding the frequency closes to the driving frequency
-        
 
-        response_amplitude= psd[:,idx] # for visual quantification of response strength taking the values corresponding to that frequency
+        if False:
+            # multiply with perturbation psd to get color coding of nodes according to their response to the driving signal, or just np.max
+            idx = np.argmin(np.abs(freqs - pert_freq)) #finding the frequency closes to the driving frequency
+            response_amplitude= psd[:,idx] # for visual quantification of response strength taking the values corresponding to that frequency
+
+        response_amplitude = np.max(np.abs(vals[:,t_traj_index:]), axis=1) 
         #response_amplitude = np.max(psd, axis=1)
-        if psd_max is None:
-            psd_max= np.max(response_amplitude)
+        if response_max is None:
+            response_max= np.max(response_amplitude)
 
         if cmap=="RdYBlu_r":
-            response_amplitude = response_amplitude / (2*psd_max)+0.5 # Normalize to [0.5,1.]
+            print( f"response amplitudes {response_amplitude} with max {response_max}")
+            response_amplitude = response_amplitude / (2*response_max)+0.5 # Normalize to [0.5,1.]
+            print("response_amplitude RdYlBlu_r:", response_amplitude)
             node_colors = plt.cm.RdYlBu_r(response_amplitude)
         elif cmap== "coolwarm":
-            response_amplitude = response_amplitude / (psd_max) # Normalize to [0.5,1.]
+            print( f"response amplitudes {response_amplitude} with max {response_max}")
+            response_amplitude = response_amplitude / (response_max) # Normalize to [0.5,1.]
+            print("response_amplitude coolwarm:", response_amplitude)
             node_colors = plt.cm.coolwarm(response_amplitude)
 
         if plot_real_psd:
@@ -1075,7 +1089,7 @@ def network_w_response(scenario,
             shift_matrix_obj= shift_matrix_obj,
             seed=42,
             vtn_edge_style="dashed",
-            vtn_color=color,
+            vtn_color=scenario_color,
             name="network.svg", 
             fs=10,
             threshhold=1e-10,
@@ -1091,7 +1105,10 @@ def network_w_response(scenario,
     t_traj_index=np.abs(t - t_final + t_window).argmin() # find t closest to t_traj bases on steps
     if color is None:
         color=orange
-    axes[0].plot(t[t_traj_index:], vals[node,t_traj_index:], color=color if only_perturbation else node_colors[node],linewidth=linewidth)
+    
+    
+
+    axes[0].plot(t[t_traj_index:], vals[node,t_traj_index:], color=scenario_color if only_perturbation else node_colors[node],linewidth=linewidth)
     axes[0].set_xlim( t_final - t_window,t_final)
     if min_max==None:
         min_max=(1.2*min(vals[node,t_traj_index:]),1.2*max(vals[node,t_traj_index:]))
@@ -1106,11 +1123,14 @@ def network_w_response(scenario,
 
     # calculate theoretical psd of that node and plot it
     omega=generate_frequency_range(model,extra_scope=0.2)
-    delta=0.05
-    rect=plt.Rectangle((pert_freq-delta,0), 2*delta, 1e3, color=color,alpha=0.3,edgecolor=[0,0,0,0],linewidth=linewidth)
+    
 
     if only_perturbation:
-        axes[1].vlines(pert_freq,0,pert_amplitude, color="black", linewidth=linewidth,alpha=1)
+        if np.isscalar(pert_freq):
+            axes[1].vlines(pert_freq,0,pert_amplitude, color="black", linewidth=linewidth,alpha=1)
+        else:
+            for i, freq in enumerate(pert_freq):
+                axes[1].vlines(freq,0,pert_amplitude, color="black", linewidth=linewidth,alpha=1)
     else:
         S = None
         if vtn_on:
@@ -1132,7 +1152,15 @@ def network_w_response(scenario,
     if plot_real_psd:
         axes[1].set_ylim((1e-10,10*np.max(response_vals[node])))
     
-    axes[1].add_patch(rect)
+    # addid perturbation prequency patches
+    delta=0.05
+    if np.isscalar(pert_freq):
+        rect=plt.Rectangle((pert_freq-delta,0), 2*delta, 1e3, color=color,alpha=0.3,edgecolor=[0,0,0,0],linewidth=linewidth)
+        axes[1].add_patch(rect)
+    else:
+        for i, freq in enumerate(pert_freq):
+            rect=plt.Rectangle((freq-delta,0), 2*delta, 1e3, color=color[i],alpha=0.3,edgecolor=[0,0,0,0],linewidth=linewidth)
+            axes[1].add_patch(rect)
 
     label_offset=0
     if only_perturbation is False and vtn_on is False:
@@ -1168,11 +1196,11 @@ def network_w_response(scenario,
         svg2png(url=svg_path,write_to=png_path,
                     parent_height=110,parent_width=400,output_height=115*4,output_width=400*4)
         if not only_perturbation and not vtn_on:
-            return (psd_max, svg_path)
+            return (response_max, svg_path)
         else:
             return svg_path
     else:
-        return psd_max
+        return response_max
 
 
     
@@ -1287,7 +1315,14 @@ def individual_shift_scenarios(shift_matrix_obj, pert_amplitude, pert_node):
         shift = (dynamics.jacobian_shift, shift_args)
         pert = (dynamics.sine_perturbation_single_node, (pert_amplitude,all_orig_freqs[shift_matrix_obj.eigenvalue_indices[i]],pert_node))
         individual_scenarios.append(pert+shift)
-    
+
+    if len(individual_shift_matrices)>1:
+        shift_args = (shift_matrix_obj.shift_matrix, model, None)
+        shift = (dynamics.jacobian_shift, shift_args)
+        pert_freqs=all_orig_freqs[shift_matrix_obj.eigenvalue_indices]
+        pert = (dynamics.sine_perturbation_single_node, (pert_amplitude,pert_freqs,pert_node))
+        individual_scenarios.append(pert+shift)
+
     return individual_scenarios
 
 
@@ -1295,7 +1330,7 @@ def scenario_panel_recursive(model,
                              scenario,
                              t_final,
                              steps=16000,
-                             color=orange, 
+                             color=np.array(orange), 
                              save_dir=None, 
                              specific_name="scenario_panel", 
                              overwrite=True,
@@ -1310,8 +1345,9 @@ def scenario_panel_recursive(model,
                              panel="a",
                              cmap="coolwarm"
                              ):
+    
     # allows for calling with a specific scenario, but also just with a shift matrix object
-    if isinstance(scenario, ShiftMatrix):
+    if isinstance(scenario, ShiftMatrix): #if no scenario, but only the shiftMatrix object (class) is provided the object construction is visualized  the individual scnearios generated
         shift_matrix_obj=scenario
         compose_shift_matrix_construction_visualization_vertical(shift_matrix_obj, log=True, absolute=True,fs=10, jac_color=darkblue,overwrite=overwrite)
         scenario_provided=False
@@ -1321,7 +1357,7 @@ def scenario_panel_recursive(model,
         if isinstance(shift_matrix_obj, ShiftMatrix):
             compose_shift_matrix_construction_visualization_vertical(shift_matrix_obj, log=True, absolute=True,fs=10, jac_color=darkblue,overwrite=overwrite)
             check_individual_shifts=True
-        else: # case of scenario with np array shift matrix instead of shift matrix object
+        else: # case of scenario with np.array shift matrix instead of ShiftMatrix object (class), sorry for poor naming of stuff
             check_individual_shifts = False
         scenario_provided=True
     
@@ -1331,9 +1367,12 @@ def scenario_panel_recursive(model,
 
             # generate individual shift scenarios, the corresponding colors
             individual_scenarios= individual_shift_scenarios(shift_matrix_obj,amplitude,pert_node=pert_node)
-            scenario_colors=create_shift_colors(len(individual_scenarios))
-            for i in range(len(scenario_colors)):
+            n_scenarios=len(individual_scenarios)
+            scenario_colors=create_shift_colors(n_scenarios-1)
+
+            for i in range(n_scenarios-1):
                 scenario_colors[i][3]=1.
+            
 
             # common shift directory for all individual scenarios
             if save_dir is None:
@@ -1350,11 +1389,11 @@ def scenario_panel_recursive(model,
                                         specific_name=f"individual_shift_{i}",
                                         overwrite=overwrite, 
                                         node=node,
-                                        color=scenario_colors[i],
+                                        color=np.array(scenario_colors[i]) if i < len(scenario_colors) else np.array(scenario_colors),
                                         fontsize=fontsize,
                                         plot_real_psd=plot_real_psd,
                                         labels=labels,
-                                        panel=chr(98+i),
+                                        panel=chr(98+i) if i<n_scenarios-1 or n_scenarios==1 else chr(101+2*i),
                                         t_window=t_window)
 
     # plot scenario of the full shift matrix if provided
@@ -1389,7 +1428,7 @@ def scenario_panel_recursive(model,
                         save_dir=save_dir,
                         panel=panel,
                         cmap=cmap)
-        psd_max=network_w_response(scenario, 
+        response_max=network_w_response(scenario, 
                                 model, 
                                 t_final, 
                                 axes=axes[1,:],   
@@ -1417,7 +1456,7 @@ def scenario_panel_recursive(model,
                             scenario_name=specific_name, 
                             overwrite=overwrite, 
                             vtn_on=True,
-                            psd_max=psd_max, 
+                            response_max=response_max, 
                             node=node, 
                             t_window=t_window,
                             min_max=min_max,
@@ -1578,7 +1617,7 @@ def illustrative(model:sokm, amplitude=0.1, overwrite=True,y_0=None,node=0,plot_
 if __name__ == "__main__":
     
     # Create a model and compute the Jacobian
-    model = sokm.illustrative_8node()
+    #model = sokm.illustrative_8node()
     #model = sokm.from_random_sparse_graph(num_nodes=8, edge_probability=0.1, damping_coefficient=0.01)
     #model = sokm.from_soft_random_geometric_graph(num_nodes=8, radius=0.3, damping_coefficient=0.01)
     #model.compute_jacobian()
@@ -1588,7 +1627,7 @@ if __name__ == "__main__":
     #model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\Instance_2026-06-03_15-42-09")
     #model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\Instance_2026-06-11_12-56-31")
     #model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\8node")
-    #model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\Moritz_vals")
+    model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\Moritz_vals")
 
     # Generate a shift matrix
     shift_matrix_obj = ShiftMatrix(model=model)
@@ -1640,7 +1679,7 @@ if __name__ == "__main__":
                              save_dir=None, 
                              specific_name="scenario_panel", 
                              overwrite=False,
-                             node=1, 
+                             node=4, 
                              t_window=20,
                              pert_node=perturbed_node,
                              labels=False,

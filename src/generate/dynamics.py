@@ -137,10 +137,19 @@ def sine_perturbation_single_node(t,y,args):
         # Example perturbation: a simple cosine function of time with given amplitude and frequency
         if np.isscalar(t):
             perturbation_vector = np.zeros_like(y)
-            perturbation_vector[node_index] = amplitude * np.sin( frequency * t)
+            if np.isscalar(frequency):
+                perturbation_vector[node_index] = amplitude * np.sin( frequency * t)
+            else:
+                for f in frequency:
+                    perturbation_vector[node_index] += amplitude * np.sin( f * t)
         else:
             perturbation_vector = np.zeros((len(y),len(t)))
-            perturbation_vector[node_index,:] = amplitude * np.sin( frequency * t)
+            if np.isscalar(frequency):
+                perturbation_vector[node_index,:] = amplitude * np.sin( frequency * t)
+            else:
+                for f in frequency:
+                    perturbation_vector[node_index,:] += amplitude/len(frequency) * np.sin( f * t)
+            #perturbation_vector[node_index,:] = amplitude * np.sin( frequency * t)
         # TODO: loop over node_indices if node_index is array of int
         
 

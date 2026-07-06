@@ -64,6 +64,33 @@ def create_cmap_from_white(color, cmap_length=256):
     #cmap_vals[:30, 3] = np.linspace(0, 1, 30)
     return ListedColormap(cmap_vals)
 
+def blend_colors(colors, mode="average",default_alpha=0.8):
+    a=colors[:,3]
+    blended_color=np.zeros((4,))
+    
+    if mode=="average":
+        n=len(colors[0,:])
+        for i in range(3):
+            blended_color[i]=np.sum(colors[:,i]*a[:])/n
+        blended_color[3]=np.sum(a[:])/n
+    elif mode=="screen":
+        blended_color[3]=1-np.prod(1-a[:])
+        for i in range(3):
+            blended_color[i]=1-np.prod(1-colors[:,i]*a[:])
+    elif mode=="plt":
+        blended_color=colors[0,:]
+
+        def blend_two_colors(RGBold, RGBnew):
+            #helperfunction to blend two colors
+            alpha = 0.5
+            return RGBold * (1 - alpha) + RGBnew * alpha
+        
+        # iteratively layering the colors on top of each other
+        for i in range(np.shape(colors)[0]-1):
+            blended_color=blend_two_colors(blended_color, colors[i+1,:])
+
+
+    return blended_color
 
 def create_shift_colors(num_shifts) -> list:
     """
@@ -90,6 +117,7 @@ def create_shift_colors(num_shifts) -> list:
         for i in range(num_shifts):
             shift_colors.append(list(individual_shift_colors_cmap (i / (num_shifts - 1))))
 
+    print("shift_colors:", np.shape(shift_colors))
     return shift_colors
 
 
@@ -311,7 +339,7 @@ def visualize_matrix(left_vec=None,
         axes[0,1].set_title(" ",fontsize=fs)
         axes[1,0].axis('off')
         axes[1,0].set_ylabel(" ",fontsize=fs)
-        if name is not None and axs is None and size[0]>1.:
+        if name is not None and axs is None and size[0]>1.4:
             if "eigenspace" in name:
                 fig.suptitle(r"eigenspace:",fontsize=fs,color="dimgrey")
             elif "physical" in name:
@@ -468,7 +496,7 @@ def shift_matrix_construction_visualization_subplots(shift_matrix_obj:ShiftMatri
 
 
 
-def compose_shift_matrix_construction_visualization_horizontal(shift_matrix_obj:ShiftMatrix, log=True, absolute=True,fs=8, jac_color=darkblue, overwrite=False):
+def compose_shift_matrix_construction_visualization_horizontal(shift_matrix_obj:ShiftMatrix, log=True, absolute=True,fs=8, jac_color=darkblue, overwrite=False, type="thumbnail"):
     """
     Compose a comprehensive visualization of the shift matrix construction process.
     This function generates a side-by-side comparison of the shift matrix construction
@@ -488,26 +516,37 @@ def compose_shift_matrix_construction_visualization_horizontal(shift_matrix_obj:
         Color for the Jacobian matrix visualization. Default is darkblue.
     overwrite : bool, optional
         If True, overwrite existing files. Default is False.
+    type : str, optional
+        Type of the visualization. Default is "thumbnail".
     -------
     save_dir : str
         Path to the saved combined SVG file (plots\\combined.svg).
     """
 
     # checking overwrite
-    save_dir=os.path.join(shift_matrix_obj.current_dir,"combined_horizontal.svg")
+    save_dir=os.path.join(shift_matrix_obj.current_dir,f"combined_horizontal_{type}.svg")
     if overwrite is False and os.path.isfile(save_dir):
         return save_dir
 
-    # generate the subfigures based on the properties of shift_matrix_obj
-    file_paths_physical=shift_matrix_construction_visualization_subplots(shift_matrix_obj, in_eigenspace=False, log=log, absolute=absolute, fs=fs, cutoff=1e-4, jac_color=jac_color, size=(0.85,0.85))
-    file_paths_eigenspace=shift_matrix_construction_visualization_subplots(shift_matrix_obj, in_eigenspace=True, log=log, absolute=absolute, fs=fs, cutoff=1e-4, jac_color=jac_color, size=(0.85,0.85))
-    
     #create new SVG figure
-    fig = sg.SVGFigure("3.5in","1.8in") #("17cm", "6.5cm")
-    #fig.append(sc.Grid(20,20)) # visual grid for ease of aligning figures
+    if type=="thumbnail":
+        combined_fig = sg.SVGFigure("3.5in","1.8in") #("17cm", "6.5cm")
+        size=(0.85,0.85)
+        scale=80
+    elif type=="shift":
+        combined_fig = sg.SVGFigure("4.3in","2.2in")
+        size=(1.25,1.25)
+        scale=100
+
+    # generate the subfigures based on the properties of shift_matrix_obj
+    file_paths_physical=shift_matrix_construction_visualization_subplots(shift_matrix_obj, in_eigenspace=False, log=log, absolute=absolute, fs=fs, cutoff=1e-4, jac_color=jac_color, size=size)
+    file_paths_eigenspace=shift_matrix_construction_visualization_subplots(shift_matrix_obj, in_eigenspace=True, log=log, absolute=absolute, fs=fs, cutoff=1e-4, jac_color=jac_color, size=size)
+    
+    
+    #combined_fig.append(sc.Grid(20,20)) # visual grid for ease of aligning figures
 
     # helper function to loop over, load and add all the generated SVGs to the figure, with appropriate positioning and scaling
-    def add_svg_row_to_figure(fig,file_paths, second_row=False):
+    def add_svg_row_to_figure(fig,file_paths, second_row=False, scale=80):
         """
         Helper function to line up the construction process of a shifted jacobian either in the eigenspace (second_row=False) or physical space (True).
         
@@ -530,7 +569,7 @@ def compose_shift_matrix_construction_visualization_horizontal(shift_matrix_obj:
         """
 
         # vertical offset of row
-        y_0 = 84 if second_row else 0
+        y_0 = scale*1.05 if second_row else 0
 
         # list to store "+"/"=" sign figures such that they can be appended to fi in the end and are layered on top of the other svgs, are not covered by them
         symbols=[]
@@ -541,9 +580,9 @@ def compose_shift_matrix_construction_visualization_horizontal(shift_matrix_obj:
 
             # horizontal offset of objects to append
             if i>0:
-                x_0 = i*80 - 10
+                x_0 = i*scale - 10
             if i==len(file_paths)-1:
-                x_0 = i*80  
+                x_0 = i*scale  
 
             # appending and positioning the svg figure of the current loop
             fig_part = sg.fromfile(path)
@@ -566,22 +605,20 @@ def compose_shift_matrix_construction_visualization_horizontal(shift_matrix_obj:
                     equal=sg.TextElement(x_0+65,y_0+32,"=",size=6)
                     symbols.append(equal)
                 
-        
 
-        # append +/= symbols on top of everything else
-        fig.append(symbols)
-    
-    add_svg_row_to_figure(fig, file_paths_eigenspace, second_row=True)
-    add_svg_row_to_figure(fig, file_paths_physical, second_row=False)
-
+                
+    add_svg_row_to_figure(combined_fig, file_paths_eigenspace, second_row=True,scale=scale)
+    add_svg_row_to_figure(combined_fig, file_paths_physical, second_row=False,scale=scale)
     # dividing line between the spaces
-    line=sc.Line([(0,87),(80*(len(file_paths_physical))-5,87)],width=0.8)
-    fig.append([line])
+    line=sc.Line([(0,scale*1.1),(scale*(len(file_paths_physical))-5,scale*1.1)],width=0.8)
+    combined_fig.append([line])
 
-    fig.save(save_dir)
-    png_path=os.path.join(shift_matrix_obj.current_dir,"combined_horizontal.png")
+    
+
+    combined_fig.save(save_dir)
+    png_path=os.path.join(shift_matrix_obj.current_dir,f"combined_horizontal_{type}.png")
     svg2png(url=save_dir,write_to=png_path,
-            parent_height=170,parent_width=80*len(file_paths_eigenspace)-5,output_height=170,output_width=80*len(file_paths_eigenspace)-5)
+            parent_height=scale*2.2,parent_width=scale*(len(file_paths_eigenspace)-0.05),output_height=scale*2.2,output_width=scale*(len(file_paths_eigenspace)-0.05))
     return save_dir
 
 
@@ -1488,7 +1525,7 @@ if __name__ == "__main__":
     #resonance_plot(model,log=True, show_resonance_location=True)
     #pre_and_post_shift_comparison_subplots(model, shift_matrix_obj)
     compose_shift_matrix_construction_visualization_vertical(shift_matrix_obj, log=True, absolute=True,fs=10, jac_color=darkblue,overwrite=True)
-    compose_shift_matrix_construction_visualization_horizontal(shift_matrix_obj, log=True, absolute=True,fs=10, jac_color=darkblue,overwrite=True)
+    compose_shift_matrix_construction_visualization_horizontal(shift_matrix_obj, log=True, absolute=True,fs=10, jac_color=darkblue,overwrite=True,type="shift")
     
 
 
