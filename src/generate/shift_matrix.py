@@ -396,7 +396,7 @@ class ShiftMatrix:
         
         return left_generators, right_generators
 
-    def cunstruct_individual_shift_matrices(self, in_eigenspace=False):
+    def construct_individual_shift_matrices(self, in_eigenspace=False):
         """
         Constructs the individual shift matrix for each desired eigenvalue shift as the outer product of 
         the corresponding left and right generating vectors, which are calculated in either the physical basis or the eigenbasis of the Jacobian 
