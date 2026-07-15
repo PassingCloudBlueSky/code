@@ -1409,7 +1409,10 @@ def generate_or_fetch_scenario_data(t_final: float, args, model: BaseModel, y_0=
 
     # checking if data already exists
     if save_dir == None:
-        save_dir=shift[1][0].current_dir
+        if shift[1] is None:
+            save_dir=model.current_dir
+        else:
+            save_dir=shift[1][0].current_dir
     filepath = os.path.join(save_dir,meta_scenario_name)+"_tfinal"+str(t_final)+".npz"
 
     
@@ -1436,7 +1439,8 @@ def generate_or_fetch_scenario_data(t_final: float, args, model: BaseModel, y_0=
 
     # numerically integrating shifted and unshifted trajectories
     t, ys = dynamics.integrate_f(t_final, y_0, instance+pert+(None,None), t_0=0, steps=steps)
-    t, ys_shifted = dynamics.integrate_f(t_final, y_0, instance+pert+shift, t_0=0, steps=steps)
+    if shift[1] is not None:
+        t, ys_shifted = dynamics.integrate_f(t_final, y_0, instance+pert+shift, t_0=0, steps=steps)
 
 
     #plt.plot(t,ys_shifted)
@@ -1445,8 +1449,11 @@ def generate_or_fetch_scenario_data(t_final: float, args, model: BaseModel, y_0=
         # fix point deviation
         ys[:len(y_0)] -= y_0[:, None]
         ys_shifted[:len(y_0)] -= y_0[:, None]
-    
-    np.savez(filepath, t=t, ys=ys-y_0[:,None] if minus_fixpoint else ys, ys_shifted=ys_shifted- y_0[:,None] if minus_fixpoint else ys_shifted)
+
+    if shift[1] is None:
+        np.savez(filepath, t=t, ys=ys-y_0[:,None] if minus_fixpoint else ys)
+    else:
+        np.savez(filepath, t=t, ys=ys-y_0[:,None] if minus_fixpoint else ys, ys_shifted=ys_shifted- y_0[:,None] if minus_fixpoint else ys_shifted)
     
     return np.load(filepath, allow_pickle=True)
 
@@ -1523,13 +1530,116 @@ def plot_vtn_powers(axes, traj, shift_matrix_obj:ShiftMatrix, model: sokm, thres
     axes.set_ylabel(r"$\overline{P}_{VTN}$")
     
     return axes
+
+def load_time_series_data(file_path):
+    """
+    Converts time series data from a text file into two NumPy arrays:
+    - Time in seconds starting from 0
+    - Corresponding measured values
+    
+    Args:
+        file_path (str): Path to the text file containing the time series data.
+    
+    Returns:
+        tuple: Two NumPy arrays (time_in_seconds, measured_values)
+    """
+    # Load the data from the file
+    data = np.loadtxt(file_path, delimiter=',', dtype=str)
+    
+    # Extract time and values
+    time_strings = data[:, 1]  # Second column (time)
+    values = data[:, 2].astype(float)  # Third column (measured values)
+    
+    # Convert time strings to seconds
+    time_in_seconds = np.array([
+        int(h) * 3600 + int(m) * 60 + int(s)
+        for h, m, s in (t.split(':') for t in time_strings)
+    ])
+    
+    # Normalize time to start from 0
+    time_in_seconds -= time_in_seconds[0]
+    
+    return time_in_seconds, values
+
+def clean_time_series(time, values, method='modified_zscore', threshold=3.5):
+    """
+    Removes far outliers from synchronized time series data using robust statistical methods.
+    
+    Parameters:
+        time (np.ndarray): 1D array of time in seconds (starting from 0).
+        values (np.ndarray): 1D array of measured values.
+        method (str): Outlier detection method ('modified_zscore' or 'iqr').
+        threshold (float): Threshold for outlier detection (default 3.5 for modified_zscore, 3.0 for iqr).
+    
+    Returns:
+        clean_time (np.ndarray): Time array with outliers removed.
+        clean_values (np.ndarray): Values array with outliers removed.
+        outlier_indices (np.ndarray): Indices of detected outliers.
+    
+    Example:
+        time, values = convert_time_series('data.txt')
+        clean_time, clean_values, outliers = clean_time_series(time, values, method='iqr', threshold=3.0)
+    """
+    values = np.asarray(values)
+    time = np.asarray(time)
+    
+    if method == 'modified_zscore':
+        median = np.median(values)
+        mad = np.median(np.abs(values - median))
+        if mad == 0:
+            mad = np.mean(np.abs(values - median))  # fallback
+        modified_z_scores = 0.6745 * (values - median) / mad
+        outlier_mask = np.abs(modified_z_scores) > threshold
+    elif method == 'iqr':
+        q1 = np.percentile(values, 25)
+        q3 = np.percentile(values, 75)
+        iqr = q3 - q1
+        lower_bound = q1 - threshold * iqr
+        upper_bound = q3 + threshold * iqr
+        outlier_mask = (values < lower_bound) | (values > upper_bound)
+    else:
+        raise ValueError("method must be 'modified_zscore' or 'iqr'")
+    
+    # Indices of outliers
+    outlier_indices = np.where(outlier_mask)[0]
+    
+    # Remove outliers from both arrays
+    clean_time = np.delete(time, outlier_indices)
+    clean_values = np.delete(values, outlier_indices)
+    
+    return clean_time, clean_values, outlier_indices
+
+def time_series_and_psd(file_path,name="trajectory"):
+
+    t, y=load_time_series_data(file_path)
+    #t,y,outlier_indices=clean_time_series(t, y, method='modified_zscore', threshold=3.5)
+    #print(f"Removed outlier indices are: {outlier_indices}")
+    t=t[y>30]
+    y=y[y>30]
+
+    freqs, psd = scipy.signal.welch(y, fs=1/(t[1]-t[0]), axis=0, nperseg=len(t))
+
+    fig, axes = plt.subplots(1, 2, figsize=(3., 0.7))
+
+    axes[0].plot(t[0:1000],y[0:1000],linewidth=0.5)
+    axes[1].plot(freqs,psd,linewidth=0.5)
+    #axes[1].set_xlim((0.,0.025))
+    axes[1].set_yscale("log")
+    axes[1].set_xscale("log")
+    save_dir="C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\50Hz\\"
+    svg_path=save_figure(fig, save_dir=save_dir, name=name+".svg")
+    png_path=os.path.join(save_dir,name+".png")
+    svg2png(url=svg_path,write_to=png_path,
+                parent_height=110,parent_width=400,output_height=115*4,output_width=400*4)
         
 
 # Example usage
 if __name__ == "__main__":
     
-    model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\Moritz_vals")
-
+    #model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\Moritz_vals")
+    model=sokm.from_adjacency_matrix("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\Example network\\adjacency.dat", a=0.01,p_c=-1.,p_p=3.,edge_weight=16)
+    model.compute_jacobian()
+    model.save_parameters()
     # Generate a shift matrix
     shift_matrix_obj = ShiftMatrix(model=model)
     eigenvalue_indices = [ 2,5]
@@ -1542,11 +1652,9 @@ if __name__ == "__main__":
     shift_matrix_obj.construct_from_scratch(eigenvalue_indices, shifts, zero_rows, zero_cols)
     #shift_matrix_obj= ShiftMatrix.load_from_file("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\Instance_2026-03-31_10-32-17\\shift_matrix.json")
     print("type is Shift matrix:", isinstance(shift_matrix_obj, ShiftMatrix))
-    #resonance_plot(model,log=True, show_resonance_location=True)
-    #pre_and_post_shift_comparison_subplots(model, shift_matrix_obj)
     compose_shift_matrix_construction_visualization_vertical(shift_matrix_obj, log=True, absolute=True,fs=10, jac_color=darkblue,overwrite=True)
     compose_shift_matrix_construction_visualization_horizontal(shift_matrix_obj, log=True, absolute=True,fs=10, jac_color=darkblue,overwrite=True,type="shift",flipped=True)
-    
+    time_series_and_psd("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\50Hz\\201105_Frequenz.txt")
 
 
     

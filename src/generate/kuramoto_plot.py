@@ -1242,7 +1242,7 @@ def network_w_response(scenario,
 
     
 
-def vtn_scenario_powers(t_final,scenario,model,absolute=False, save_dir=None, threshhold=1e-10,epsilon=None,specific_name="shift",fontsize=10):
+def vtn_scenario_powers(t_final,scenario,model,absolute=False, save_dir=None, threshhold=1e-10,epsilon=None,specific_name="shift",fontsize=10, axes=None):
     """
     Plots the vtn of the powers of a given scenario for the on and off case in a format compatible with plot network_w_response. 
     color: 294e62ff
@@ -1448,7 +1448,7 @@ def scenario_panel_recursive(model,
 
     # plot scenario of the full shift matrix if provided
     if scenario_provided:
-        fig, axes = plt.subplots(3, 2, figsize=(3., 2.6)) #, gridspec_kw={"width_ratios": [3, 3]}) ehem. (2.7,2.1)
+        fig, axes = plt.subplots(4, 2, figsize=(4., 2.6)) #, gridspec_kw={"width_ratios": [3, 3]}) ehem. (2.7,2.1)
 
         traj=generate_or_fetch_scenario_data(t_final, scenario, model, y_0=y_0, steps=steps, meta_scenario_name=specific_name, save_dir=save_dir, overwrite=overwrite, minus_fixpoint= True, silent=False)
         vals=np.zeros((np.shape(model.jacobian_matrix)[0],steps+1))
@@ -1555,6 +1555,89 @@ def scenario_panel_recursive(model,
         vtn_scenario_powers(t_final,scenario,model,absolute=False,save_dir=save_dir,epsilon=amplitude,specific_name=power_plot_name,fontsize=fontsize)
 
 
+def probe_network(model, shift_matrix_obj=None, pert_node=1,pert_amplitude=0.1, num=100,t_final=800, steps=16000, node=5, save_dir=None, name="large_network", overwrite=True ):
+    """
+    Creates a plot of the network and two additional panels inderneath side by side with the following content: 
+    steady state response to white continuous noise and psd of the steady state response and theoretical psd on top 
+    """
+    # create subfigure grid
+    fig = plt.figure(figsize=(3, 2), layout='constrained')
+    axs = fig.subplot_mosaic([["network", "network"],
+                          ["trajectory", "psd"]])
+    
+    # create network plot
+    plot_network(
+            model,
+            seed=42,
+            #vtn_edge_style="dashed",
+            #vtn_color=scenario_color,
+            name="network.svg", 
+            fs=10,
+            threshhold=1e-10,
+            perturbed_node=None,
+            node_colors="black",
+            #axes=axes[0],
+            axes=axs["network"],
+            node_size=10,
+            labels=False
+        )
+    
+    vtn_on=True if shift_matrix_obj!=None else False
+    
+    # create the scenario
+    print("Creating scenario.")
+    all_orig_freqs = model.predict_resonance_frequencies()
+    all_orig_freqs = all_orig_freqs[np.invert(np.isnan(all_orig_freqs))]
+    pert_freqs=np.linspace(np.min(all_orig_freqs),np.max(all_orig_freqs),num=num)
+    pert = (dynamics.sine_perturbation_single_node, (pert_amplitude,pert_freqs,pert_node))
+
+    if vtn_on:
+        shift_args = (shift_matrix_obj, model, None)
+        shift = (dynamics.jacobian_shift, shift_args)
+    else:
+        shift=(None,None)    
+    scenario=pert+shift
+
+    # fetch trajectory and plot
+    print("The simulation bit.")
+    traj=generate_or_fetch_scenario_data(t_final, scenario, model, steps=steps, meta_scenario_name="default", overwrite=overwrite, minus_fixpoint=False,silent=False)
+    t=traj["t"]
+    if vtn_on:
+        vals=traj["ys_shifted"][:np.shape(model.jacobian_matrix)[0],:] #fetching only the node trajectories, not the velocity trajectories
+    else:
+        vals=traj["ys"][:np.shape(model.jacobian_matrix)[0],:]
+
+    #axs["trajectory"].plot(t[-500:],vals[node,-500:])
+    pert_vals=np.zeros((np.shape(model.jacobian_matrix)[0],steps+1))
+    pert_vals=dynamics.sine_perturbation_single_node(t,pert_vals[:,0],scenario[1])
+    print("plotting trajectory")
+    axs["trajectory"].plot(t[:300],vals[pert_node,:300])
+    axs["trajectory"].plot(t[:300],pert_vals[pert_node,:300],color="red",linewidth=1.)
+    
+    # calculate and plot psd
+    t=t[10000:]
+    node_vals=vals[pert_node,10000:]
+    
+    print("plotting and calculating psd")
+    freqs, psd = scipy.signal.welch(node_vals, fs=1/(t[1]-t[0]), axis=0, nperseg=len(t))
+    axs["psd"].plot(freqs,psd)
+    axs["psd"].set_yscale("log")
+    axs["psd"].set_ylim(pert_amplitude/num*1e-2,1.5*np.max(psd))
+
+    # calculate theoretical response amplitudes and plot it on top as a thin black line 
+    response_vals=model.calculate_response_amplitudes(freqs,k=pert_node)
+    axs["psd"].plot(freqs,response_vals[node,:],color="black",linewidth=1.)
+    plt.show()
+
+    # save the figure
+    if save_dir== None and shift_matrix_obj==None:
+        save_dir= model.current_dir
+    elif save_dir== None:
+            save_dir = shift_matrix_obj.current_dir
+    svg_path=save_figure(fig, save_dir=save_dir, name=name+".svg")
+    png_path=os.path.join(save_dir,name+".png")
+    svg2png(url=svg_path,write_to=png_path,
+                    parent_height=110,parent_width=400,output_height=115*4,output_width=400*4)
 
 
 if __name__ == "__main__":
@@ -1571,6 +1654,9 @@ if __name__ == "__main__":
     #model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\Instance_2026-06-11_12-56-31")
     #model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\8node")
     model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\Moritz_vals")
+    #model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\Example network")
+    model.compute_jacobian()
+    
 
     # Generate a shift matrix
     shift_matrix_obj = ShiftMatrix(model=model)
@@ -1591,7 +1677,7 @@ if __name__ == "__main__":
     #compose_shift_matrix_construction_visualization(shift_matrix_obj, log=True, absolute=True,fs=8, jac_color=black)
     perturbed_node=5
     t_final=750
-    steps=15000
+    steps=30000
     meta_scenario_name="sine_scenario"
     #angle_comparison(model, shift_matrix_obj)
     nodes=[0,3]
@@ -1610,6 +1696,10 @@ if __name__ == "__main__":
                                     noise_type="realistic",
                                     overwrite=False
                                     )
+    if False:
+        print(np.sum(model.power_vector))
+        probe_network(model, overwrite=True, pert_amplitude=0.01, num =100)
+
 
     plot_network(
             model,
@@ -1633,7 +1723,7 @@ if __name__ == "__main__":
                              save_dir=None, 
                              specific_name="scenario_panel", 
                              overwrite=False,
-                             node=3, 
+                             node=4, 
                              t_window=20,
                              pert_node=perturbed_node,
                              labels=False,
