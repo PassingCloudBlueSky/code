@@ -5,6 +5,7 @@ from matplotlib.pylab import False_, eig
 from plot_utils import *
 from typing import Optional
 import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
 from matplotlib import colors
 from matplotlib.ticker import FuncFormatter
 from matplotlib.colors import ListedColormap, Normalize, LinearSegmentedColormap
@@ -1038,6 +1039,14 @@ def v_line_locations_from_shift(model:sokm, shift_matrix_obj:ShiftMatrix):
 
     return np.concatenate([frequencies_prior, frequencies_post_theo]), np.concatenate([pre_color, post_color])
 
+def break_axes(axes, size=6):
+    axes[0].spines.right.set_visible(False)
+    axes[1].spines.left.set_visible(False)
+    d = .5  # proportion of vertical to horizontal extent of the slanted line
+    kwargs = dict(marker=[(-d, -1), (d, 1)], markersize=size,
+              linestyle="none", color='k', mec='k', mew=1, clip_on=False)
+    axes[0].plot([1, 1], [1, 0], transform=axes[0].transAxes, **kwargs)
+    axes[1].plot([0, 0], [0, 1], transform=axes[1].transAxes, **kwargs)
 
 def network_w_response(scenario, 
                        model:sokm, 
@@ -1096,7 +1105,7 @@ def network_w_response(scenario,
 
     # plotting network
     if not only_perturbation:
-        ax_network = axes[0].inset_axes([0.2, 0.2, 0.6, 0.75])
+        ax_network = axes[1].inset_axes([0.2, 0.2, 0.6, 0.75])
 
         if False:
             # multiply with perturbation psd to get color coding of nodes according to their response to the driving signal, or just np.max
@@ -1117,7 +1126,7 @@ def network_w_response(scenario,
 
         if plot_real_psd:
             for i in range(np.shape(psd)[0]):
-                axes[1].plot(freqs,psd[i,:],linewidth=linewidth,color=node_colors[i])
+                axes[2].plot(freqs,psd[i,:],linewidth=linewidth,color=node_colors[i])
 
         # plot network with node color coding according to response psd
         plot_network(
@@ -1131,30 +1140,33 @@ def network_w_response(scenario,
             threshhold=1e-10,
             perturbed_node=None,
             node_colors=node_colors,
-            #axes=axes[0],
+            #axes=axes[1],
             axes=ax_network,
             node_size=10,
             labels=labels
         )
 
     # plot trajectory for one selected node
-    t_traj_index=np.abs(t - t_final + t_window).argmin() # find t closest to t_traj bases on steps
+    t_traj_index=np.abs(t - t_final + t_window).argmin() # find t closest to t_final bases on steps
+    t_window_index=np.abs(t - t_window).argmin() # find t closest to t_window bases on steps
     if color is None:
         color=orange
     
-    
-
-    axes[0].plot(t[t_traj_index:], vals[node,t_traj_index:], color=scenario_color if only_perturbation else node_colors[node],linewidth=linewidth)
-    axes[0].set_xlim( t_final - t_window,t_final)
+    axes[0].plot(t[:t_window_index], vals[node,:t_window_index], color=scenario_color if only_perturbation else node_colors[node],linewidth=linewidth)
+    axes[1].plot(t[t_traj_index:], vals[node,t_traj_index:], color=scenario_color if only_perturbation else node_colors[node],linewidth=linewidth)
+    axes[1].set_yticks([])
+    axes[0].set_xlim(np.min(t),t_window)
+    axes[1].set_xlim( t_final - t_window,t_final)
     if min_max==None:
         if only_perturbation:
             min_max=(2.*min(vals[node,t_traj_index:]),2.*max(vals[node,t_traj_index:]))
         else:
             min_max=(1.2*min(vals[node,t_traj_index:]),1.2*max(vals[node,t_traj_index:]))
     axes[0].set_ylim(min_max)
+    axes[1].set_ylim(min_max)
 
     axes[0].set_yticks(np.round(min_max if only_perturbation else (0.,min_max[1]),decimals=1))
-    axes[0].set_xticks(np.round((np.min(t[t_traj_index:]),np.max(t[t_traj_index:]))))
+    axes[1].set_xticks(np.round((np.min(t[t_traj_index:]),np.max(t[t_traj_index:]))))
 
     
 
@@ -1167,6 +1179,7 @@ def network_w_response(scenario,
             axes[1].vlines(pert_freq,0,pert_amplitude, color="black", linewidth=linewidth,alpha=1)
         else:
             for i, freq in enumerate(pert_freq):
+                print(f"plotting vline at {freq}")
                 axes[1].vlines(freq,0,pert_amplitude, color="black", linewidth=linewidth,alpha=1)
     else:
         S = None
@@ -1176,28 +1189,36 @@ def network_w_response(scenario,
             else:
                 S=shift_matrix_obj
         response_vals=model.calculate_response_amplitudes(omega,S=S,k=pert_node)
-        axes[1].plot(omega, response_vals[node], color="black",linewidth=linewidth)
-        axes[1].set_ylim((np.min(response_vals[node]),10*np.max(response_vals[node])))
-    axes[1].set_xlim(min(omega),max(omega))    
-    axes[1].set_yscale("log")
-    axes[1].yaxis.tick_right()
+        axes[2].plot(omega, response_vals[node], color="black",linewidth=linewidth)
+        axes[2].set_ylim((np.min(response_vals[node]),10*np.max(response_vals[node])))
+    axes[2].set_xlim(min(omega),max(omega))    
+    axes[2].set_yscale("log")
+    #axes[2].yaxis.tick_right()
     if not only_perturbation:
-        axes[1].set_ylim(1e-2,1e0)
-        axes[1].set_yticks([1e-2,1e0])
+        axes[2].set_ylim(1e-2,1e0)
+        axes[2].set_yticks([1e-2,1e0])
     else:
-        axes[1].set_yticks([1e-2,1e0])
+        axes[2].set_yticks([1e-2,1e0])
     if plot_real_psd:
-        axes[1].set_ylim((1e-10,10*np.max(response_vals[node])))
+        axes[2].set_ylim((1e-10,10*np.max(response_vals[node])))
     
     # addid perturbation prequency patches
     delta=0.05
     if np.isscalar(pert_freq):
         rect=plt.Rectangle((pert_freq-delta,0), 2*delta, 1e3, color=color,alpha=0.3,edgecolor=[0,0,0,0],linewidth=linewidth)
-        axes[1].add_patch(rect)
+        axes[2].add_patch(rect)
     else:
         for i, freq in enumerate(pert_freq):
             rect=plt.Rectangle((freq-delta,0), 2*delta, 1e3, color=color[i],alpha=0.3,edgecolor=[0,0,0,0],linewidth=linewidth)
-            axes[1].add_patch(rect)
+            axes[2].add_patch(rect)
+
+    if only_perturbation:
+        if np.isscalar(pert_freq):
+            axes[1].vlines(pert_freq,0,pert_amplitude, color="black", linewidth=linewidth,alpha=1)
+        else:
+            for i, freq in enumerate(pert_freq):
+                print(f"plotting vline at {freq} with amplitude {pert_amplitude}")
+                axes[1].vlines(freq,0,pert_amplitude, color="black", linewidth=linewidth,alpha=1)
 
     label_offset=0
     if only_perturbation is False and vtn_on is False:
@@ -1211,10 +1232,13 @@ def network_w_response(scenario,
         xytext=(+0.1, -0.1), textcoords='offset fontsize',
         fontsize=fontsize, verticalalignment='top', fontfamily='serif')
     label_2= panel + f"{str(2+label_offset)}"
-    axes[1].annotate(rf"\textbf{{{label_2}}}",
+    axes[2].annotate(rf"\textbf{{{label_2}}}",
         xy=(0, 1), xycoords='axes fraction',
         xytext=(+0.1, -0.1), textcoords='offset fontsize',
         fontsize=fontsize, verticalalignment='top', fontfamily='serif')
+    
+    # breaking axes
+    break_axes(axes)
 
     # saving as SVG and PNG
     if save:
@@ -1242,17 +1266,16 @@ def network_w_response(scenario,
 
     
 
-def vtn_scenario_powers(t_final,scenario,model,absolute=False, save_dir=None, threshhold=1e-10,epsilon=None,specific_name="shift",fontsize=10, axes=None):
+def vtn_scenario_powers(t_final,t_window,scenario,model,axes,absolute=False, save_dir=None, threshhold=1e-10,epsilon=None,specific_name="shift",fontsize=10, linewidth=1. ):
     """
     Plots the vtn of the powers of a given scenario for the on and off case in a format compatible with plot network_w_response. 
     color: 294e62ff
     """
-    default_color=[41/255, 98/255, 255/255,1.]
     shift_matrix_obj=scenario[3][0]
 
-    fig, axes = plt.subplots(3, 1, figsize=(1.4, 2.6)) 
-    axes[0].set_axis_off()
-    plt.subplots_adjust(hspace=0.25, wspace=0.05)
+    #fig, axes = plt.subplots(3, 1, figsize=(1.4, 2.6)) 
+    #axes[1].set_axis_off()
+    #plt.subplots_adjust(hspace=0.25, wspace=0.05)
 
     # fetching indices nodes where powers are applied based on the shift matrix
     if type(shift_matrix_obj) is ShiftMatrix:
@@ -1273,46 +1296,64 @@ def vtn_scenario_powers(t_final,scenario,model,absolute=False, save_dir=None, th
     p_vtn_average= np.cumsum(p_vtn,axis=1)[:,1:]/t[None,1:] #skipping first entry in order to avoid division by zero
 
     # vtn_off
-    p_vtn_off= np.zeros_like(p_vtn_average)
+    #p_vtn_off= np.zeros_like(p_vtn_average)
 
     if absolute:
         p_vtn_average=np.abs(p_vtn_average)
 
     p_i=np.max(model.power_vector)
-    p_vtn_off=p_vtn_off/p_i
     p_vtn_average=p_vtn_average/p_i
     # bess colors
     #colors=["orange", "blue","green","red","darkblue"]
     colors=[]
+
     # plot
+    t_traj_index=np.abs(t - t_final + t_window).argmin()
+    t_window_index=np.abs(t - t_window).argmin()
+    
     for bess_index in range(len(vtn_nodes)):
         #axes.plot(t,p_vtn[bess_index], color=colors[bess_index],linewidth=0.5)
         
-        axes[1].plot(t[1:],p_vtn_off[bess_index],color=colors[bess_index] if len(colors) > bess_index else "#294e62ff",linewidth=0.5, alpha=0.8)
-        axes[2].plot(t[1:],p_vtn_average[bess_index],color=colors[bess_index] if len(colors) > bess_index else "#294e62ff", linewidth=0.5, alpha=0.8)
+        axes[0].plot(t[:t_window_index],p_vtn[bess_index,:t_window_index],color=colors[bess_index] if len(colors) > bess_index else "#294e62ff",linewidth=linewidth, alpha=0.8)
+        axes[0].plot(t[:t_window_index],np.zeros_like(t[:t_window_index]),color="black",linewidth=linewidth/2, alpha=0.8, linestyle ="--")
+        axes[1].plot(t[t_traj_index:],p_vtn[bess_index,t_traj_index:],color=colors[bess_index] if len(colors) > bess_index else "#294e62ff",linewidth=linewidth, alpha=0.8)
+        axes[1].plot(t[t_traj_index:],np.zeros_like(t[t_traj_index:]),color="black",linewidth=linewidth/2, alpha=0.8, linestyle ="--")
+        axes[2].plot(t[1:],p_vtn_average[bess_index],color=colors[bess_index] if len(colors) > bess_index else "#294e62ff", linewidth=linewidth, alpha=0.8)
+        axes[2].plot(t[1:],np.zeros_like(t[1:]),color="black",linewidth=linewidth/2, alpha=0.8, linestyle ="--")
         #plt.plot(t,p_vtn[bess_index], color=colors[bess_index])
         #plt.plot(t[1:],p_vtn_average[bess_index], linestyle="--",color=colors[bess_index])
         #plt.show()
 
     if absolute:
         axes.set_yscale("log")
-    axes[1].set_xticks([])
-    axes[1].set_xlim(np.round((min(t),max(t))))
+    #axes[1].set_xticks([])
+    axes[0].set_xlim(np.min(t),t_window)
+    axes[1].set_xlim((np.round(t[t_traj_index]),t_final))
     axes[2].set_xlabel(r"$t$")
-    axes[2].set_xlim(np.round((min(t),max(t))))
+    axes[2].set_xlim(np.round((min(t),t_final)))
 
     # y_axis labeling
-    y_lims=np.round(np.array([np.min(p_vtn_average),np.max(p_vtn_average)]),decimals=3)
+    y_ticks=np.round(np.array([np.min(p_vtn),np.max(p_vtn)]),decimals=1)
+    y_lims=(np.min(p_vtn),np.max(p_vtn))
+    axes[0].set_ylim(y_lims)
     axes[1].set_ylim(y_lims)
     axes[2].set_ylim(y_lims)
-    y_vals=np.append(y_lims,0.)
-    y_ticks=[rf"${{{val}}}\%$" for val in np.round(y_vals*100,decimals=2)]
-    axes[1].set_yticks(y_vals,labels=y_ticks)
-    axes[2].set_yticks(y_vals,labels=y_ticks)
-    axes[1].set_ylabel(r"$\overline{P}_{\mathrm{s}}/{P_{\mathrm{max}}}$")
+    #y_vals_avrg=np.append(y_lims_avrg,0.)
+    #y_ticks=[rf"${{{val}}}\%$" for val in np.round(y_vals_avrg*100,decimals=2)]
+    #axes[1].set_yticks(y_vals,labels=y_ticks)
+    #axes[2].set_yticks(y_vals_avrg,labels=y_ticks)
+    axes[0].set_ylabel(r"$P_{\mathrm{s}}/{P_{\mathrm{max}}}$")
+    axes[0].set_yticks(y_ticks)
+    axes[1].set_yticks([])
+    axes[2].set_yticks(y_ticks)
     axes[2].set_ylabel(r"$\overline{P}_{\mathrm{s}}/{P_{\mathrm{max}}}$")
+    #axes[2].yaxis.set_label_position("right")
+    #axes[2].yaxis.tick_right()
 
-    axes[1].annotate(
+    # create the broken axes effect
+    break_axes(axes)
+
+    axes[0].annotate(
         r"\textbf{a2}",
         xy=(0, 1), xycoords='axes fraction',
         xytext=(+0.1, -0.1), textcoords='offset fontsize',
@@ -1322,17 +1363,18 @@ def vtn_scenario_powers(t_final,scenario,model,absolute=False, save_dir=None, th
         xy=(0, 1), xycoords='axes fraction',
         xytext=(+0.1, -0.1), textcoords='offset fontsize',
         fontsize=fontsize, verticalalignment='top', fontfamily='serif')
-    #axes[0].annotate(r"$(\mathrm{a})$", (-0.5, 0.5), fontsize=fontsize, annotation_clip=False)
+    #axes[1].annotate(r"$(\mathrm{a})$", (-0.5, 0.5), fontsize=fontsize, annotation_clip=False)
 
     # saving
-    if save_dir is None:
-        save_dir = shift_matrix_obj.current_dir
-    specific_name+= "cumsum_vtn_powers"
-    svg_path=save_figure(fig, save_dir=save_dir, name=specific_name+".svg")
-    png_path=os.path.join(save_dir,specific_name+".png")
-    svg2png(url=svg_path,write_to=png_path,
-                parent_height=110,parent_width=400,output_height=115*4,output_width=400*4)
-    return svg_path
+    if False:
+        if save_dir is None:
+            save_dir = shift_matrix_obj.current_dir
+        specific_name+= "cumsum_vtn_powers"
+        svg_path=save_figure(fig, save_dir=save_dir, name=specific_name+".svg")
+        png_path=os.path.join(save_dir,specific_name+".png")
+        svg2png(url=svg_path,write_to=png_path,
+                    parent_height=110,parent_width=400,output_height=115*4,output_width=400*4)
+    #return svg_path
 
 
 def individual_shift_scenarios(shift_matrix_obj, pert_amplitude, pert_node, flip=False):
@@ -1392,7 +1434,8 @@ def scenario_panel_recursive(model,
                              y_0=None,
                              t_window=50,
                              panel="a",
-                             cmap="coolwarm"
+                             cmap="coolwarm",
+                             linewidth=1.
                              ):
     
     # allows for calling with a specific scenario, but also just with a shift matrix object
@@ -1444,11 +1487,45 @@ def scenario_panel_recursive(model,
                                         plot_real_psd=plot_real_psd,
                                         labels=labels,
                                         panel=chr(98+n_scenarios-i-2) if i<n_scenarios-1 or n_scenarios==1 else chr(101+2*i),
-                                        t_window=t_window)
+                                        t_window=t_window,
+                                        linewidth=linewidth)
 
     # plot scenario of the full shift matrix if provided
     if scenario_provided:
-        fig, axes = plt.subplots(4, 2, figsize=(4., 2.6)) #, gridspec_kw={"width_ratios": [3, 3]}) ehem. (2.7,2.1)
+        #fig, axes = plt.subplots(4, 3, figsize=(3.6, 4.)) #, gridspec_kw={"width_ratios": [3, 3]}) ehem. (2.7,2.1)
+
+        # creating main grid for plots
+        fig = plt.figure(figsize=(4.4, 4.))
+        gs_main = gridspec.GridSpec(2, 2, figure=fig, hspace=0.25, wspace=0.3,height_ratios=[6,2], width_ratios=[2,1])
+
+        # creating subgrids
+        hspace=0.15
+        gs_traj = gs_main[0,0].subgridspec(3, 2,hspace=hspace, wspace=0.05)
+        gs_psd = gs_main[0,1].subgridspec(3, 1,hspace=hspace)
+        gs_p = gs_main[1,0].subgridspec(1, 2, wspace=0.05)
+        gs_p_mean = gs_main[1,1].subgridspec(1, 1)
+        grids= [gs_traj,gs_psd,gs_p,gs_p_mean]
+
+        if False:
+            gs_traj = gridspec.GridSpec(3, 2, right=2.3, wspace=0.05, hspace=0.25, bottom=2.7)
+            gs_psd = gridspec.GridSpec(3, 1, left=2.4, wspace=0.05, bottom=2.7)
+            gs_p = gridspec.GridSpec(1, 2, right=2.3, wspace=0.05, top= 2.8)
+            gs_p_mean = gridspec.GridSpec(1, 1, left=2.4 , top= 2.8)
+
+        # creating axes for plotting inside the subgrids
+        #axes=np.empty((4,3))
+        axes = [[None for _ in range(3)] for _ in range(4)]
+        for i in range(3): 
+            axes[i][0]=fig.add_subplot(gs_traj[i, 0])
+            axes[i][1]=fig.add_subplot(gs_traj[i, 1])
+            axes[i][2]=fig.add_subplot(gs_psd[i, 0])
+        axes[3][0]=fig.add_subplot(gs_p[0, 0])
+        axes[3][1]=fig.add_subplot(gs_p[0, 1])
+        axes[3][2]=fig.add_subplot(gs_p_mean[0, 0])
+        
+
+
+        
 
         traj=generate_or_fetch_scenario_data(t_final, scenario, model, y_0=y_0, steps=steps, meta_scenario_name=specific_name, save_dir=save_dir, overwrite=overwrite, minus_fixpoint= True, silent=False)
         vals=np.zeros((np.shape(model.jacobian_matrix)[0],steps+1))
@@ -1464,7 +1541,7 @@ def scenario_panel_recursive(model,
         network_w_response(scenario, 
                         model, 
                         t_final, 
-                        axes=axes[0,:],  
+                        axes=axes[0],  
                         color=color,
                         only_perturbation=True, 
                         y_0=y_0, 
@@ -1478,11 +1555,12 @@ def scenario_panel_recursive(model,
                         labels=labels,
                         save_dir=save_dir,
                         panel=panel,
-                        cmap=cmap)
+                        cmap=cmap,
+                        linewidth=linewidth)
         response_max=network_w_response(scenario, 
                                 model, 
                                 t_final, 
-                                axes=axes[1,:],   
+                                axes=axes[1],   
                                 color=color,
                                 y_0=y_0, 
                                 steps=steps, 
@@ -1496,11 +1574,12 @@ def scenario_panel_recursive(model,
                                 labels=labels,
                         save_dir=save_dir,
                         panel=panel,
-                        cmap=cmap)
+                        cmap=cmap,
+                        linewidth=linewidth)
         network_w_response(scenario, 
                             model, 
                             t_final, 
-                            axes=axes[2,:], 
+                            axes=axes[2], 
                             color=color,
                             y_0=y_0, 
                             steps=steps, 
@@ -1515,36 +1594,41 @@ def scenario_panel_recursive(model,
                             labels=labels,
                         save_dir=save_dir,
                         panel=panel,
-                        cmap=cmap)
+                        cmap=cmap,
+                        linewidth=linewidth)
         
+        vtn_scenario_powers(t_final,t_window,scenario,model,axes[3],absolute=False,epsilon=amplitude,save_dir=save_dir,fontsize=fontsize,linewidth=linewidth)
 
-        axes[0,0].set_xticks([])
-        axes[0,1].set_xticks([])
-        axes[1,0].set_xticks([])
-        axes[1,1].set_xticks([])
-        plt.subplots_adjust(hspace=0.25, wspace=0.05)
+        axes[0][0].set_xticks([])
+        axes[0][1].set_xticks([])
+        axes[0][2].set_xticks([])
+        axes[1][1].set_xticks([])
+        axes[1][2].set_xticks([])
+        axes[1][0].set_xticks([])
+        #axes[2,1].set_xticks([])
+        #plt.subplots_adjust(hspace=0.25, wspace=0.05)
 
         # labels
         print("Computing LaTex labels.")
         #axes[0,0].annotate(r"$(\mathrm{b})$", (-100, 0), fontsize=fontsize, annotation_clip=False)
-        axes[0,0].set_ylabel(r"$g_{k}$",fontsize=fontsize,labelpad=0.1)
-        axes[1,0].set_ylabel(r"$\Delta\theta_l$",fontsize=fontsize)
-        axes[2,0].set_ylabel(r"$\Delta\theta_l$",fontsize=fontsize)
-        axes[0,1].set_ylabel(r"$\hat{g}_{k}$",fontsize=fontsize)
-        axes[0,1].yaxis.set_label_position("right")
-        axes[1,1].set_ylabel(r"$\mathrm{A}_l$",fontsize=fontsize)
-        axes[1,1].yaxis.set_label_position("right")
-        axes[2,1].set_ylabel(r"$\mathrm{A}_l$",fontsize=fontsize)
-        axes[2,1].yaxis.set_label_position("right")
+        axes[0][0].set_ylabel(r"$g_{k}(t)$",fontsize=fontsize,labelpad=0.1)
+        axes[1][0].set_ylabel(r"$\Delta\theta_l$",fontsize=fontsize)
+        axes[2][0].set_ylabel(r"$\Delta\theta_l$",fontsize=fontsize)
+        axes[0][2].set_ylabel(r"$\hat{g}_{k}(\omega)$",fontsize=fontsize)
+        #axes[0][2].yaxis.set_label_position("right")
+        axes[1][2].set_ylabel(r"$\mathrm{A}_l$",fontsize=fontsize)
+        #axes[1][2].yaxis.set_label_position("right")
+        axes[2][2].set_ylabel(r"$\mathrm{A}_l$",fontsize=fontsize)
+        #axes[2][2].yaxis.set_label_position("right")
         #axes[2,1].xaxis.label.set_position((0.5, 1.1))
-        axes[2,0].set_xlabel(r"$t$",fontsize=fontsize)
-        axes[2,1].set_xlabel(r"$\omega$",fontsize=fontsize)
+        axes[2][1].set_xlabel(r"$t$",fontsize=fontsize)
+        axes[3][1].set_xlabel(r"$t$",fontsize=fontsize)
+        axes[2][2].set_xlabel(r"$\omega$",fontsize=fontsize)
         
         
 
         # saving the panel
-        if save_dir== None:
-            save_dir = shift_matrix_obj.current_dir
+        
         power_plot_name=specific_name
         specific_name+=f"_node{node}"
         svg_path=save_figure(fig, save_dir=save_dir, name=specific_name+".svg")
@@ -1552,7 +1636,7 @@ def scenario_panel_recursive(model,
         svg2png(url=svg_path,write_to=png_path,
                     parent_height=110,parent_width=400,output_height=115*4,output_width=400*4)
         
-        vtn_scenario_powers(t_final,scenario,model,absolute=False,save_dir=save_dir,epsilon=amplitude,specific_name=power_plot_name,fontsize=fontsize)
+        #vtn_scenario_powers(t_final,scenario,model,absolute=False,save_dir=save_dir,epsilon=amplitude,specific_name=power_plot_name,fontsize=fontsize)
 
 
 def probe_network(model, shift_matrix_obj=None, pert_node=1,pert_amplitude=0.1, num=100,t_final=800, steps=16000, node=5, save_dir=None, name="large_network", overwrite=True ):
@@ -1724,7 +1808,7 @@ if __name__ == "__main__":
                              specific_name="scenario_panel", 
                              overwrite=False,
                              node=4, 
-                             t_window=20,
+                             t_window=30,
                              pert_node=perturbed_node,
                              labels=False,
                              fontsize=10,
