@@ -244,7 +244,7 @@ def plot_network(
     seed=42,
     edge_weight_key="weight",
     edge_weight_visualization="length",
-    vtn_edge_style="dashed",
+    vtn_edge_style="dotted",
     vtn_color=None,
     name="network", 
     fs=6,
@@ -1073,6 +1073,9 @@ def network_w_response(scenario,
     shift_matrix_obj = scenario[3][0] if vtn_on else None
     pert_amplitude, pert_freq, pert_node= scenario[1]
 
+    transient = len(axes)==3
+    t_window_steady= t_window/2 if transient else t_window
+
     # create grid of subplots with first axis narrower than the others
     save=False
     if axes is None:
@@ -1097,7 +1100,7 @@ def network_w_response(scenario,
         node = pert_node # setting node i.e. the of vals which we plot to the index of perturbed node
 
     # calculate steady state response psd for each node
-    t_traj_index=np.abs(t - t_final + t_window).argmin() 
+    t_traj_index=np.abs(t - t_final + t_window_steady).argmin() 
     freqs, psd = compute_psd_from_traj(t[t_traj_index:], vals[:,t_traj_index:]) 
     freqs =2*np.pi*freqs # converting to omega
 
@@ -1105,7 +1108,7 @@ def network_w_response(scenario,
 
     # plotting network
     if not only_perturbation:
-        ax_network = axes[1].inset_axes([0.2, 0.2, 0.6, 0.75])
+        ax_network = axes[0].inset_axes([0.2, 0.2, 0.6, 0.75])
 
         if False:
             # multiply with perturbation psd to get color coding of nodes according to their response to the driving signal, or just np.max
@@ -1126,15 +1129,16 @@ def network_w_response(scenario,
 
         if plot_real_psd:
             for i in range(np.shape(psd)[0]):
-                axes[2].plot(freqs,psd[i,:],linewidth=linewidth,color=node_colors[i])
+                axes[1+transient].plot(freqs,psd[i,:],linewidth=linewidth,color=node_colors[i])
 
         # plot network with node color coding according to response psd
         plot_network(
             model,
             shift_matrix_obj= shift_matrix_obj,
             seed=42,
-            vtn_edge_style="dashed",
-            vtn_color=scenario_color,
+            vtn_edge_style="dotted",
+            #vtn_color=scenario_color,
+            vtn_color="#294e62ff",
             name="network.svg", 
             fs=10,
             threshhold=1e-10,
@@ -1147,26 +1151,29 @@ def network_w_response(scenario,
         )
 
     # plot trajectory for one selected node
-    t_traj_index=np.abs(t - t_final + t_window).argmin() # find t closest to t_final bases on steps
+    t_traj_index=np.abs(t - t_final + t_window_steady).argmin() # find t closest to t_final bases on steps
     t_window_index=np.abs(t - t_window).argmin() # find t closest to t_window bases on steps
     if color is None:
         color=orange
     
-    axes[0].plot(t[:t_window_index], vals[node,:t_window_index], color=scenario_color if only_perturbation else node_colors[node],linewidth=linewidth)
-    axes[1].plot(t[t_traj_index:], vals[node,t_traj_index:], color=scenario_color if only_perturbation else node_colors[node],linewidth=linewidth)
-    axes[1].set_yticks([])
-    axes[0].set_xlim(np.min(t),t_window)
-    axes[1].set_xlim( t_final - t_window,t_final)
+    if transient:
+        axes[0].plot(t[:t_window_index], vals[node,:t_window_index], color=scenario_color if only_perturbation else node_colors[node],linewidth=linewidth)
+        axes[1].set_yticks([])
+        axes[0].set_xlim(np.min(t),t_window)
+    axes[0+transient].plot(t[t_traj_index:], vals[node,t_traj_index:], color=scenario_color if only_perturbation else node_colors[node],linewidth=linewidth)
+    axes[0+transient].set_xlim( t_final - t_window_steady,t_final)
     if min_max==None:
         if only_perturbation:
             min_max=(2.*min(vals[node,t_traj_index:]),2.*max(vals[node,t_traj_index:]))
         else:
             min_max=(1.2*min(vals[node,t_traj_index:]),1.2*max(vals[node,t_traj_index:]))
     axes[0].set_ylim(min_max)
-    axes[1].set_ylim(min_max)
+    if transient:
+        axes[1].set_ylim(min_max)
 
     axes[0].set_yticks(np.round(min_max if only_perturbation else (0.,min_max[1]),decimals=1))
-    axes[1].set_xticks(np.round((np.min(t[t_traj_index:]),np.max(t[t_traj_index:]))))
+
+    axes[0+transient].set_xticks(np.round((np.min(t[t_traj_index:]),np.max(t[t_traj_index:]))))
 
     
 
@@ -1176,11 +1183,11 @@ def network_w_response(scenario,
 
     if only_perturbation:
         if np.isscalar(pert_freq):
-            axes[1].vlines(pert_freq,0,pert_amplitude, color="black", linewidth=linewidth,alpha=1)
+            axes[1+transient].vlines(pert_freq,0,pert_amplitude, color="black", linewidth=linewidth,alpha=1)
         else:
             for i, freq in enumerate(pert_freq):
                 print(f"plotting vline at {freq}")
-                axes[1].vlines(freq,0,pert_amplitude, color="black", linewidth=linewidth,alpha=1)
+                axes[1+transient].vlines(freq,0,pert_amplitude, color="black", linewidth=linewidth,alpha=1)
     else:
         S = None
         if vtn_on:
@@ -1189,28 +1196,28 @@ def network_w_response(scenario,
             else:
                 S=shift_matrix_obj
         response_vals=model.calculate_response_amplitudes(omega,S=S,k=pert_node)
-        axes[2].plot(omega, response_vals[node], color="black",linewidth=linewidth)
-        axes[2].set_ylim((np.min(response_vals[node]),10*np.max(response_vals[node])))
-    axes[2].set_xlim(min(omega),max(omega))    
-    axes[2].set_yscale("log")
-    #axes[2].yaxis.tick_right()
+        axes[1+transient].plot(omega, response_vals[node], color="black",linewidth=linewidth)
+        axes[1+transient].set_ylim((np.min(response_vals[node]),10*np.max(response_vals[node])))
+    axes[1+transient].set_xlim(min(omega),max(omega))    
+    axes[1+transient].set_yscale("log")
+    #axes[1+transient].yaxis.tick_right()
     if not only_perturbation:
-        axes[2].set_ylim(1e-2,1e0)
-        axes[2].set_yticks([1e-2,1e0])
+        axes[1+transient].set_ylim(1e-2,1e0)
+        axes[1+transient].set_yticks([1e-2,1e0])
     else:
-        axes[2].set_yticks([1e-2,1e0])
+        axes[1+transient].set_yticks([1e-2,1e0])
     if plot_real_psd:
-        axes[2].set_ylim((1e-10,10*np.max(response_vals[node])))
+        axes[1+transient].set_ylim((1e-10,10*np.max(response_vals[node])))
     
     # addid perturbation prequency patches
     delta=0.05
     if np.isscalar(pert_freq):
         rect=plt.Rectangle((pert_freq-delta,0), 2*delta, 1e3, color=color,alpha=0.3,edgecolor=[0,0,0,0],linewidth=linewidth)
-        axes[2].add_patch(rect)
+        axes[1+transient].add_patch(rect)
     else:
         for i, freq in enumerate(pert_freq):
             rect=plt.Rectangle((freq-delta,0), 2*delta, 1e3, color=color[i],alpha=0.3,edgecolor=[0,0,0,0],linewidth=linewidth)
-            axes[2].add_patch(rect)
+            axes[1+transient].add_patch(rect)
 
     if only_perturbation:
         if np.isscalar(pert_freq):
@@ -1232,13 +1239,14 @@ def network_w_response(scenario,
         xytext=(+0.1, -0.1), textcoords='offset fontsize',
         fontsize=fontsize, verticalalignment='top', fontfamily='serif')
     label_2= panel + f"{str(2+label_offset)}"
-    axes[2].annotate(rf"\textbf{{{label_2}}}",
+    axes[1+transient].annotate(rf"\textbf{{{label_2}}}",
         xy=(0, 1), xycoords='axes fraction',
         xytext=(+0.1, -0.1), textcoords='offset fontsize',
         fontsize=fontsize, verticalalignment='top', fontfamily='serif')
     
     # breaking axes
-    break_axes(axes)
+    if transient:
+        break_axes(axes)
 
     # saving as SVG and PNG
     if save:
@@ -1271,6 +1279,10 @@ def vtn_scenario_powers(t_final,t_window,scenario,model,axes,absolute=False, sav
     Plots the vtn of the powers of a given scenario for the on and off case in a format compatible with plot network_w_response. 
     color: 294e62ff
     """
+
+    transient = len(axes)==3
+    t_window_steady= t_window/2 if transient else t_window
+
     shift_matrix_obj=scenario[3][0]
 
     #fig, axes = plt.subplots(3, 1, figsize=(1.4, 2.6)) 
@@ -1308,18 +1320,18 @@ def vtn_scenario_powers(t_final,t_window,scenario,model,axes,absolute=False, sav
     colors=[]
 
     # plot
-    t_traj_index=np.abs(t - t_final + t_window).argmin()
+    t_traj_index=np.abs(t - t_final + t_window_steady).argmin()
     t_window_index=np.abs(t - t_window).argmin()
     
     for bess_index in range(len(vtn_nodes)):
         #axes.plot(t,p_vtn[bess_index], color=colors[bess_index],linewidth=0.5)
-        
-        axes[0].plot(t[:t_window_index],p_vtn[bess_index,:t_window_index],color=colors[bess_index] if len(colors) > bess_index else "#294e62ff",linewidth=linewidth, alpha=0.8)
-        axes[0].plot(t[:t_window_index],np.zeros_like(t[:t_window_index]),color="black",linewidth=linewidth/2, alpha=0.8, linestyle ="--")
-        axes[1].plot(t[t_traj_index:],p_vtn[bess_index,t_traj_index:],color=colors[bess_index] if len(colors) > bess_index else "#294e62ff",linewidth=linewidth, alpha=0.8)
-        axes[1].plot(t[t_traj_index:],np.zeros_like(t[t_traj_index:]),color="black",linewidth=linewidth/2, alpha=0.8, linestyle ="--")
-        axes[2].plot(t[1:],p_vtn_average[bess_index],color=colors[bess_index] if len(colors) > bess_index else "#294e62ff", linewidth=linewidth, alpha=0.8)
-        axes[2].plot(t[1:],np.zeros_like(t[1:]),color="black",linewidth=linewidth/2, alpha=0.8, linestyle ="--")
+        if transient:
+            axes[0].plot(t[:t_window_index],p_vtn[bess_index,:t_window_index],color=colors[bess_index] if len(colors) > bess_index else "#294e62ff",linewidth=linewidth, alpha=0.8)
+            axes[0].plot(t[:t_window_index],np.zeros_like(t[:t_window_index]),color="black",linewidth=linewidth/2, alpha=0.8, linestyle ="--")
+        axes[0+transient].plot(t[t_traj_index:],p_vtn[bess_index,t_traj_index:],color=colors[bess_index] if len(colors) > bess_index else "#294e62ff",linewidth=linewidth, alpha=0.8)
+        axes[0+transient].plot(t[t_traj_index:],np.zeros_like(t[t_traj_index:]),color="black",linewidth=linewidth/2, alpha=0.8, linestyle ="--")
+        axes[1+transient].plot(t[1:],p_vtn_average[bess_index],color=colors[bess_index] if len(colors) > bess_index else "#294e62ff", linewidth=linewidth, alpha=0.8)
+        axes[1+transient].plot(t[1:],np.zeros_like(t[1:]),color="black",linewidth=linewidth/2, alpha=0.8, linestyle ="--")
         #plt.plot(t,p_vtn[bess_index], color=colors[bess_index])
         #plt.plot(t[1:],p_vtn_average[bess_index], linestyle="--",color=colors[bess_index])
         #plt.show()
@@ -1327,38 +1339,43 @@ def vtn_scenario_powers(t_final,t_window,scenario,model,axes,absolute=False, sav
     if absolute:
         axes.set_yscale("log")
     #axes[1].set_xticks([])
-    axes[0].set_xlim(np.min(t),t_window)
-    axes[1].set_xlim((np.round(t[t_traj_index]),t_final))
-    axes[2].set_xlabel(r"$t$")
-    axes[2].set_xlim(np.round((min(t),t_final)))
+    if transient:
+        axes[0].set_xlim(np.min(t),t_window)
+    axes[0+transient].set_xlim((np.round(t[t_traj_index]),t_final))
+    axes[1+transient].set_xlabel(r"$t$")
+    axes[1+transient].set_xlim(np.round((min(t),t_final)))
 
     # y_axis labeling
     y_ticks=np.round(np.array([np.min(p_vtn),np.max(p_vtn)]),decimals=1)
     y_lims=(np.min(p_vtn),np.max(p_vtn))
-    axes[0].set_ylim(y_lims)
-    axes[1].set_ylim(y_lims)
-    axes[2].set_ylim(y_lims)
+
+    if transient:
+        axes[0].set_ylim(y_lims)
+        axes[1].set_yticks([])
+    
+    axes[0+transient].set_ylim(y_lims)
+    axes[1+transient].set_ylim(y_lims)
     #y_vals_avrg=np.append(y_lims_avrg,0.)
     #y_ticks=[rf"${{{val}}}\%$" for val in np.round(y_vals_avrg*100,decimals=2)]
     #axes[1].set_yticks(y_vals,labels=y_ticks)
     #axes[2].set_yticks(y_vals_avrg,labels=y_ticks)
     axes[0].set_ylabel(r"$P_{\mathrm{s}}/{P_{\mathrm{max}}}$")
     axes[0].set_yticks(y_ticks)
-    axes[1].set_yticks([])
-    axes[2].set_yticks(y_ticks)
-    axes[2].set_ylabel(r"$\overline{P}_{\mathrm{s}}/{P_{\mathrm{max}}}$")
+    axes[1+transient].set_yticks(y_ticks)
+    axes[1+transient].set_ylabel(r"$\overline{P}_{\mathrm{s}}/{P_{\mathrm{max}}}$")
     #axes[2].yaxis.set_label_position("right")
     #axes[2].yaxis.tick_right()
 
     # create the broken axes effect
-    break_axes(axes)
+    if transient: 
+        break_axes(axes)
 
     axes[0].annotate(
         r"\textbf{a2}",
         xy=(0, 1), xycoords='axes fraction',
         xytext=(+0.1, -0.1), textcoords='offset fontsize',
         fontsize=fontsize, verticalalignment='top', fontfamily='serif')
-    axes[2].annotate(
+    axes[1+transient].annotate(
         r"\textbf{a3}",
         xy=(0, 1), xycoords='axes fraction',
         xytext=(+0.1, -0.1), textcoords='offset fontsize',
@@ -1435,7 +1452,8 @@ def scenario_panel_recursive(model,
                              t_window=50,
                              panel="a",
                              cmap="coolwarm",
-                             linewidth=1.
+                             linewidth=1.,
+                             transient=True
                              ):
     
     # allows for calling with a specific scenario, but also just with a shift matrix object
@@ -1466,7 +1484,6 @@ def scenario_panel_recursive(model,
             for i in range(n_scenarios-1):
                 scenario_colors[i][3]=1.
             
-            print("number of scenarios:",n_scenarios)
             # common shift directory for all individual scenarios
             if save_dir is None:
                 save_dir= shift_matrix_obj.current_dir
@@ -1488,42 +1505,52 @@ def scenario_panel_recursive(model,
                                         labels=labels,
                                         panel=chr(98+n_scenarios-i-2) if i<n_scenarios-1 or n_scenarios==1 else chr(101+2*i),
                                         t_window=t_window,
-                                        linewidth=linewidth)
+                                        linewidth=linewidth,
+                                        transient=True if i == 0 else False)
 
     # plot scenario of the full shift matrix if provided
     if scenario_provided:
         #fig, axes = plt.subplots(4, 3, figsize=(3.6, 4.)) #, gridspec_kw={"width_ratios": [3, 3]}) ehem. (2.7,2.1)
 
-        # creating main grid for plots
-        fig = plt.figure(figsize=(4.4, 4.))
-        gs_main = gridspec.GridSpec(2, 2, figure=fig, hspace=0.25, wspace=0.3,height_ratios=[6,2], width_ratios=[2,1])
+        def create_scenario_panel_axes(transient=False):
+            """
+            Creates the panel axes and figure instance for the plot. If transient is True three axes has the shape (4 x 2) otherwise (3 x 2) and the first column is dropped.
+            """
 
-        # creating subgrids
-        hspace=0.15
-        gs_traj = gs_main[0,0].subgridspec(3, 2,hspace=hspace, wspace=0.05)
-        gs_psd = gs_main[0,1].subgridspec(3, 1,hspace=hspace)
-        gs_p = gs_main[1,0].subgridspec(1, 2, wspace=0.05)
-        gs_p_mean = gs_main[1,1].subgridspec(1, 1)
-        grids= [gs_traj,gs_psd,gs_p,gs_p_mean]
 
-        if False:
-            gs_traj = gridspec.GridSpec(3, 2, right=2.3, wspace=0.05, hspace=0.25, bottom=2.7)
-            gs_psd = gridspec.GridSpec(3, 1, left=2.4, wspace=0.05, bottom=2.7)
-            gs_p = gridspec.GridSpec(1, 2, right=2.3, wspace=0.05, top= 2.8)
-            gs_p_mean = gridspec.GridSpec(1, 1, left=2.4 , top= 2.8)
+            # creating main grid for plots
+            if transient:
+                fig = plt.figure(figsize=(4.4, 3.2))
+                gs_main = gridspec.GridSpec(2, 2, figure=fig, hspace=0.25, wspace=0.3,height_ratios=[6,2], width_ratios=[2,1])
+            else:
+                fig = plt.figure(figsize=(2.9, 3.2))
+                gs_main = gridspec.GridSpec(2, 2, figure=fig, hspace=0.25, wspace=0.3,height_ratios=[6,2], width_ratios=[1,1])
+            # creating subgrids
+            hspace=0.15
+            wspace=0.05
+            if transient:
+                gs_traj = gs_main[0,0].subgridspec(3, 2,hspace=hspace, wspace=wspace,width_ratios=[2,1])
+                gs_p = gs_main[1,0].subgridspec(1, 2, wspace=wspace,width_ratios=[2,1])
+            else:
+                gs_traj = gs_main[0,0].subgridspec(3, 1,hspace=hspace, wspace=wspace)
+                gs_p = gs_main[1,0].subgridspec(1, 1, wspace=wspace)
+            gs_psd = gs_main[0,1].subgridspec(3, 1,hspace=hspace)
+            gs_p_mean = gs_main[1,1].subgridspec(1, 1)
 
-        # creating axes for plotting inside the subgrids
-        #axes=np.empty((4,3))
-        axes = [[None for _ in range(3)] for _ in range(4)]
-        for i in range(3): 
-            axes[i][0]=fig.add_subplot(gs_traj[i, 0])
-            axes[i][1]=fig.add_subplot(gs_traj[i, 1])
-            axes[i][2]=fig.add_subplot(gs_psd[i, 0])
-        axes[3][0]=fig.add_subplot(gs_p[0, 0])
-        axes[3][1]=fig.add_subplot(gs_p[0, 1])
-        axes[3][2]=fig.add_subplot(gs_p_mean[0, 0])
+            # creating axes for plotting inside the subgrids
+            axes = [[None for _ in range(2+transient)] for _ in range(4)]
+            for i in range(3): 
+                if transient:
+                    axes[i][0]=fig.add_subplot(gs_traj[i, 0])
+                axes[i][0+transient]=fig.add_subplot(gs_traj[i, 0+transient])
+                axes[i][1+transient]=fig.add_subplot(gs_psd[i, 0])
+            if transient:
+                axes[3][0]=fig.add_subplot(gs_p[0, 0])
+            axes[3][0+transient]=fig.add_subplot(gs_p[0, 0+transient])
+            axes[3][1+transient]=fig.add_subplot(gs_p_mean[0, 0])
+            return fig, axes
         
-
+        fig, axes= create_scenario_panel_axes(transient)
 
         
 
@@ -1599,11 +1626,12 @@ def scenario_panel_recursive(model,
         
         vtn_scenario_powers(t_final,t_window,scenario,model,axes[3],absolute=False,epsilon=amplitude,save_dir=save_dir,fontsize=fontsize,linewidth=linewidth)
 
+        if transient:
+            axes[0][2].set_xticks([])
+            axes[1][2].set_xticks([])
         axes[0][0].set_xticks([])
         axes[0][1].set_xticks([])
-        axes[0][2].set_xticks([])
         axes[1][1].set_xticks([])
-        axes[1][2].set_xticks([])
         axes[1][0].set_xticks([])
         #axes[2,1].set_xticks([])
         #plt.subplots_adjust(hspace=0.25, wspace=0.05)
@@ -1614,16 +1642,16 @@ def scenario_panel_recursive(model,
         axes[0][0].set_ylabel(r"$g_{k}(t)$",fontsize=fontsize,labelpad=0.1)
         axes[1][0].set_ylabel(r"$\Delta\theta_l$",fontsize=fontsize)
         axes[2][0].set_ylabel(r"$\Delta\theta_l$",fontsize=fontsize)
-        axes[0][2].set_ylabel(r"$\hat{g}_{k}(\omega)$",fontsize=fontsize)
+        axes[0][1+transient].set_ylabel(r"$\hat{g}_{k}(\omega)$",fontsize=fontsize)
         #axes[0][2].yaxis.set_label_position("right")
-        axes[1][2].set_ylabel(r"$\mathrm{A}_l$",fontsize=fontsize)
+        axes[1][1+transient].set_ylabel(r"$\mathrm{A}_l$",fontsize=fontsize)
         #axes[1][2].yaxis.set_label_position("right")
-        axes[2][2].set_ylabel(r"$\mathrm{A}_l$",fontsize=fontsize)
+        axes[2][1+transient].set_ylabel(r"$\mathrm{A}_l$",fontsize=fontsize)
         #axes[2][2].yaxis.set_label_position("right")
         #axes[2,1].xaxis.label.set_position((0.5, 1.1))
-        axes[2][1].set_xlabel(r"$t$",fontsize=fontsize)
-        axes[3][1].set_xlabel(r"$t$",fontsize=fontsize)
-        axes[2][2].set_xlabel(r"$\omega$",fontsize=fontsize)
+        axes[2][0].set_xlabel(r"$t$",fontsize=fontsize)
+        axes[3][0].set_xlabel(r"$t$",fontsize=fontsize)
+        axes[2][1+transient].set_xlabel(r"$\omega$",fontsize=fontsize)
         
         
 
@@ -1808,7 +1836,7 @@ if __name__ == "__main__":
                              specific_name="scenario_panel", 
                              overwrite=False,
                              node=4, 
-                             t_window=30,
+                             t_window=10,
                              pert_node=perturbed_node,
                              labels=False,
                              fontsize=10,
