@@ -34,6 +34,7 @@ class SecondOrderKuramotoModel(BaseModel):
         damping_coefficient: float,
         ode_dimension: Optional[int] = None,
         model_ode_args: Optional[Tuple[Any, ...]] = None,
+        current_dir: Optional[str] = None
     ):
         """
         Initialize the Kuramoto model with system parameters.
@@ -55,6 +56,7 @@ class SecondOrderKuramotoModel(BaseModel):
         self.damping_coefficient = float(damping_coefficient)
         self.ode_dimension = ode_dimension if ode_dimension is not None else len(power_vector)*2
         self.model_ode_args = model_ode_args
+        self.current_dir=current_dir
 
     @classmethod
     def from_random_sparse_graph(
@@ -149,6 +151,33 @@ class SecondOrderKuramotoModel(BaseModel):
         p = 1*np.array([-1,-1,-1,-1,3,-1,3,-1]) # pre-factor 10 in case of Xiaozhu
 
         return cls(K, p, a)
+    
+    @classmethod
+    def from_adjacency_matrix(cls,path, a=0.01,p_c=-1.,p_p=3.,edge_weight=16) -> "SecondOrderKuramotoModel":
+        """
+        
+        """
+        f = open(path,"r")
+        adj = f.read().splitlines()
+        f.close()
+        adj2 = []
+        for i in range(0,len(adj)):
+            adj2.append(adj[i].split(" "))
+            for j in range(0,len(adj2[i])):
+                adj2[i][j] = float(adj2[i][j])
+        K = edge_weight*np.array(adj2)
+        size=np.shape(K)[0]
+        p=p_c*np.ones(80)
+        if (-size*p_c)%(p_c-p_p)!=0:
+            raise ValueError(f"No matching number combination production power {p_p} and consumer powers {p_c} and a network of size {size}.")
+        print(f"Num of producer nodes is {int((size*p_c)/(p_c-p_p))}.")
+        for i in range(int((size*p_c)/(p_c-p_p))):
+            index=np.random.randint(0,size-1)
+            while p[index]==p_p:
+                index=np.random.randint(0,size-1)
+            p[index]=p_p
+        #L=np.diag(adj2.sum(axis=0))-adj2
+        return cls(K, p, a, current_dir=os.path.dirname(path))
 
     
     @classmethod
@@ -276,10 +305,14 @@ class SecondOrderKuramotoModel(BaseModel):
             Path to the saved folder.
         """
         date_str = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        save_dir = os.path.join(base_dir, f"Instance_{date_str}")
-        os.makedirs(save_dir, exist_ok=True)
-        self.current_dir= save_dir
+        if self.current_dir!=None:
+            save_dir=self.current_dir
+        else:
+            save_dir = os.path.join(base_dir, f"Instance_{date_str}")
+            os.makedirs(save_dir, exist_ok=True)
+            self.current_dir= save_dir
         # Save parameters as .npy and .json for readability
+        print(save_dir)
         np.save(os.path.join(save_dir, "connectivity_matrix.npy"), self.connectivity_matrix)
         np.save(os.path.join(save_dir, "power_vector.npy"), self.power_vector)
         params = {

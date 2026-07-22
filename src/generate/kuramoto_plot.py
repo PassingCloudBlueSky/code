@@ -254,7 +254,7 @@ def plot_network(
     axes=None,
     node_size=10,
     labels=True,
-    node_type=False
+    show_node_type=False,
 ):
     """
     Plot a network with edge weights represented as thickness or as geometry (edge length), plus an
@@ -324,7 +324,10 @@ def plot_network(
     pos = nx.spring_layout(G, seed=seed, weight=layout_weight)
     # Create the figure and axis
     if axes== None:
-        fig, ax = plt.subplots(figsize=(2., 0.8))
+        if show_node_type:
+            fig, ax = plt.subplots(figsize=(4., 1.6))
+        else:
+            fig, ax = plt.subplots(figsize=(2., 0.8))
     else:
         ax=axes
 
@@ -336,7 +339,7 @@ def plot_network(
     
 
     # Draw the base graph
-    if node_type:
+    if show_node_type:
         p=model.power_vector
         square=np.where(p>0)[0]
         triangle=np.where(p<0)[0]
@@ -1136,9 +1139,9 @@ def network_w_response(scenario,
             model,
             shift_matrix_obj= shift_matrix_obj,
             seed=42,
-            vtn_edge_style="dotted",
-            #vtn_color=scenario_color,
-            vtn_color="#294e62ff",
+            vtn_edge_style="dashed",
+            vtn_color=scenario_color,
+            #vtn_color="#294e62ff",
             name="network.svg", 
             fs=10,
             threshhold=1e-10,
@@ -1170,10 +1173,10 @@ def network_w_response(scenario,
     axes[0].set_ylim(min_max)
     if transient:
         axes[1].set_ylim(min_max)
-
+        axes[0].set_xticks([ np.round(np.min(t)) , np.round(0.8*t_window) ])
     axes[0].set_yticks(np.round(min_max if only_perturbation else (0.,min_max[1]),decimals=1))
 
-    axes[0+transient].set_xticks(np.round((np.min(t[t_traj_index:]),np.max(t[t_traj_index:]))))
+    axes[0+transient].set_xticks([np.round(t_window_steady*0.2+np.min(t[t_traj_index:])),np.max(t[t_traj_index:])])
 
     
 
@@ -1202,10 +1205,12 @@ def network_w_response(scenario,
     axes[1+transient].set_yscale("log")
     #axes[1+transient].yaxis.tick_right()
     if not only_perturbation:
-        axes[1+transient].set_ylim(1e-2,1e0)
-        axes[1+transient].set_yticks([1e-2,1e0])
+        axes[1+transient].set_ylim(1e-2,np.max(response_vals)*2)
+        #axes[1+transient].set_yticks([round_log(np.min(response_vals[node])),round_log(np.max(response_vals[node])*2)])
+        #axes[1+transient].set_yticks([1e-2,1e2])
     else:
-        axes[1+transient].set_yticks([1e-2,1e0])
+        axes[1+transient].set_ylim(1e-2,pert_amplitude*2)
+        axes[1+transient].set_yticks([1e-2,pert_amplitude*10])
     if plot_real_psd:
         axes[1+transient].set_ylim((1e-10,10*np.max(response_vals[node])))
     
@@ -1224,7 +1229,6 @@ def network_w_response(scenario,
             axes[1].vlines(pert_freq,0,pert_amplitude, color="black", linewidth=linewidth,alpha=1)
         else:
             for i, freq in enumerate(pert_freq):
-                print(f"plotting vline at {freq} with amplitude {pert_amplitude}")
                 axes[1].vlines(freq,0,pert_amplitude, color="black", linewidth=linewidth,alpha=1)
 
     label_offset=0
@@ -1274,7 +1278,7 @@ def network_w_response(scenario,
 
     
 
-def vtn_scenario_powers(t_final,t_window,scenario,model,axes,absolute=False, save_dir=None, threshhold=1e-10,epsilon=None,specific_name="shift",fontsize=10, linewidth=1. ):
+def vtn_scenario_powers(t_final,t_window,scenario,model,axes,absolute=False, save_dir=None, threshhold=1e-10,epsilon=None,specific_name="shift",fontsize=10, linewidth=1., panel="a" ):
     """
     Plots the vtn of the powers of a given scenario for the on and off case in a format compatible with plot network_w_response. 
     color: 294e62ff
@@ -1341,13 +1345,17 @@ def vtn_scenario_powers(t_final,t_window,scenario,model,axes,absolute=False, sav
     #axes[1].set_xticks([])
     if transient:
         axes[0].set_xlim(np.min(t),t_window)
+        axes[0].set_xticks([ np.round(np.min(t)) , np.round(0.8*t_window) ])
     axes[0+transient].set_xlim((np.round(t[t_traj_index]),t_final))
+    axes[0+transient].set_xticks([np.round(t_window_steady*0.2+np.min(t[t_traj_index:])),np.max(t[t_traj_index:])])
     axes[1+transient].set_xlabel(r"$t$")
     axes[1+transient].set_xlim(np.round((min(t),t_final)))
 
     # y_axis labeling
-    y_ticks=np.round(np.array([np.min(p_vtn),np.max(p_vtn)]),decimals=1)
     y_lims=(np.min(p_vtn),np.max(p_vtn))
+    if np.min(p_vtn)>-0.1 and np.max(p_vtn)<0.1: # avoiding too long labels for the plot
+        y_lims= (-0.1,0.1)
+    y_ticks=round_log(np.array(y_lims),decimals=0)
 
     if transient:
         axes[0].set_ylim(y_lims)
@@ -1359,10 +1367,11 @@ def vtn_scenario_powers(t_final,t_window,scenario,model,axes,absolute=False, sav
     #y_ticks=[rf"${{{val}}}\%$" for val in np.round(y_vals_avrg*100,decimals=2)]
     #axes[1].set_yticks(y_vals,labels=y_ticks)
     #axes[2].set_yticks(y_vals_avrg,labels=y_ticks)
-    axes[0].set_ylabel(r"$P_{\mathrm{s}}/{P_{\mathrm{max}}}$")
+    axes[0].set_ylabel(r"$P_{\mathrm{s}}/{P_{\mathrm{p}}}$")
+    print("setting power y ticks to", y_ticks)
     axes[0].set_yticks(y_ticks)
     axes[1+transient].set_yticks(y_ticks)
-    axes[1+transient].set_ylabel(r"$\overline{P}_{\mathrm{s}}/{P_{\mathrm{max}}}$")
+    axes[1+transient].set_ylabel(r"$\overline{P}_{\mathrm{s}}/{P_{\mathrm{p}}}$")
     #axes[2].yaxis.set_label_position("right")
     #axes[2].yaxis.tick_right()
 
@@ -1370,13 +1379,15 @@ def vtn_scenario_powers(t_final,t_window,scenario,model,axes,absolute=False, sav
     if transient: 
         break_axes(axes)
 
+    label_1= panel + f"{str(7)}"
+    label_2= panel + f"{str(8)}"
     axes[0].annotate(
-        r"\textbf{a2}",
+        rf"\textbf{{{label_1}}}",
         xy=(0, 1), xycoords='axes fraction',
         xytext=(+0.1, -0.1), textcoords='offset fontsize',
         fontsize=fontsize, verticalalignment='top', fontfamily='serif')
     axes[1+transient].annotate(
-        r"\textbf{a3}",
+        rf"\textbf{{{label_2}}}",
         xy=(0, 1), xycoords='axes fraction',
         xytext=(+0.1, -0.1), textcoords='offset fontsize',
         fontsize=fontsize, verticalalignment='top', fontfamily='serif')
@@ -1400,7 +1411,7 @@ def individual_shift_scenarios(shift_matrix_obj, pert_amplitude, pert_node, flip
     """
 
     # fetch individual shift matrices
-    individual_shift_matrices=shift_matrix_obj.construct_individual_shift_matrices(in_eigenspace=False)
+    permutation, individual_shift_matrices=shift_matrix_obj.construct_individual_shift_matrices(space="physical")
 
     # collect original resonance frequencies prio to shift for perturbation
     all_orig_freqs = model.predict_resonance_frequencies()
@@ -1506,7 +1517,7 @@ def scenario_panel_recursive(model,
                                         panel=chr(98+n_scenarios-i-2) if i<n_scenarios-1 or n_scenarios==1 else chr(101+2*i),
                                         t_window=t_window,
                                         linewidth=linewidth,
-                                        transient=True if i == 0 else False)
+                                        transient=True if i == 1 else False)
 
     # plot scenario of the full shift matrix if provided
     if scenario_provided:
@@ -1524,7 +1535,7 @@ def scenario_panel_recursive(model,
                 gs_main = gridspec.GridSpec(2, 2, figure=fig, hspace=0.25, wspace=0.3,height_ratios=[6,2], width_ratios=[2,1])
             else:
                 fig = plt.figure(figsize=(2.9, 3.2))
-                gs_main = gridspec.GridSpec(2, 2, figure=fig, hspace=0.25, wspace=0.3,height_ratios=[6,2], width_ratios=[1,1])
+                gs_main = gridspec.GridSpec(2, 2, figure=fig, hspace=0.25, wspace=0.3*1.5,height_ratios=[6,2], width_ratios=[1,1])
             # creating subgrids
             hspace=0.15
             wspace=0.05
@@ -1624,7 +1635,7 @@ def scenario_panel_recursive(model,
                         cmap=cmap,
                         linewidth=linewidth)
         
-        vtn_scenario_powers(t_final,t_window,scenario,model,axes[3],absolute=False,epsilon=amplitude,save_dir=save_dir,fontsize=fontsize,linewidth=linewidth)
+        vtn_scenario_powers(t_final,t_window,scenario,model,axes[3],absolute=False,epsilon=amplitude,save_dir=save_dir,fontsize=fontsize,linewidth=linewidth, panel=panel)
 
         if transient:
             axes[0][2].set_xticks([])
@@ -1765,9 +1776,10 @@ if __name__ == "__main__":
     #model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\Instance_2026-06-03_15-42-09")
     #model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\Instance_2026-06-11_12-56-31")
     #model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\8node")
-    model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\Moritz_vals")
+    #model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\Moritz_vals")
     #model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\Example network")
-    model.compute_jacobian()
+    model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\moritz_a_001")
+    #model.compute_jacobian()
     
 
     # Generate a shift matrix
@@ -1784,7 +1796,8 @@ if __name__ == "__main__":
     #resonance_plot(model,log=True, show_resonance_location=True)
     #pre_and_post_shift_comparison_subplots(model, shift_matrix_obj)
     
-
+    
+    print(f"Xs: {shift_matrix_obj.Xs} and Ys: {shift_matrix_obj.Ys}")
 
     #compose_shift_matrix_construction_visualization(shift_matrix_obj, log=True, absolute=True,fs=8, jac_color=black)
     perturbed_node=5
@@ -1823,7 +1836,7 @@ if __name__ == "__main__":
             perturbed_node=None,
             node_size=50,
             labels=False,
-            node_type=True
+            show_node_type=True
         )
     #scenarios = generate_scenarios(model, noise_type="sine", perturbation_strength=0.1, frequency_samples=400 , steps=steps, overwrite=True)
     #illustrative(model, amplitude=0.1, overwrite=False, node=4, plot_real_psd=False, labels=False)
@@ -1835,7 +1848,7 @@ if __name__ == "__main__":
                              save_dir=None, 
                              specific_name="scenario_panel", 
                              overwrite=False,
-                             node=4, 
+                             node=1, 
                              t_window=10,
                              pert_node=perturbed_node,
                              labels=False,

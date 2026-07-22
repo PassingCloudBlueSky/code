@@ -350,7 +350,7 @@ class ShiftMatrix:
         return coefficients
 
 
-    def calculate_shift_matrix_generators(self, in_eigenspace=False) -> List[np.ndarray]:
+    def calculate_shift_matrix_generators(self, space="physical") -> List[np.ndarray]:
         """
         Calculate individual shift generating vectors corresponding to each desired eigenvalue shift.  
         If in_eigenspace is True, the individual generating vectors are calculated in the eigenbasis of the Jacobian, simply being the coefficients
@@ -380,7 +380,7 @@ class ShiftMatrix:
         # looping over all individual shift matrices
         for i in range(len(self.eigenvalue_indices)):
 
-            if in_eigenspace:
+            if space is not "physical":
                 dim=self.jacobian.shape[0]
                 p=np.zeros(dim)
                 q=np.zeros(dim)
@@ -393,10 +393,37 @@ class ShiftMatrix:
                 q = self.eigenvectors[:, self.Ys[i]] @ self.nus[i]
                 left_generators.append(p)
                 right_generators.append(q)
-        
-        return left_generators, right_generators
 
-    def construct_individual_shift_matrices(self, in_eigenspace=False):
+        
+        # construct permutation array
+        permutation = np.arange(np.shape(self.jacobian)[0])
+        if space == "permutation":
+            
+
+            X_lens = [len(X) for X in self.Xs]
+            Y_lens = [len(Y) for Y in self.Ys]
+
+            #print(X_lens,Y_lens, self.eigenvalue_indices)
+
+            # going through the size of the construction vectors of each individual shift and adding the permutation where it becomes upper diagonal
+            for i, shift_index in enumerate(self.eigenvalue_indices):
+                permuted_index = np.max([X_lens[i],Y_lens[i]])-1 # minus one because indexation starts at 0, not at one
+                switching_index = permutation[permuted_index] # index currently at target location ofthe shift index
+                permutation[np.where(permutation == shift_index)] = switching_index # moving this index to the current location of the shift index
+                permutation[permuted_index] = shift_index # moving the shift index to the new location
+            
+            #print(f"The permutation is: {permutation}")
+            # applying the permutation to the generator vectors
+            for i in range(len(self.eigenvalue_indices)):
+                left_generators[i] = left_generators[i][permutation]
+                right_generators[i] = right_generators[i][permutation]
+
+        return permutation , left_generators , right_generators
+    
+
+
+
+    def construct_individual_shift_matrices(self, space= "physical"):
         """
         Constructs the individual shift matrix for each desired eigenvalue shift as the outer product of 
         the corresponding left and right generating vectors, which are calculated in either the physical basis or the eigenbasis of the Jacobian 
@@ -404,17 +431,19 @@ class ShiftMatrix:
 
         Parameters:
         ----------
-            in_eigenspace : bool
-                Wheter to calculate in the eigenbasis of the Jacobian or in the physical basis.
+            space: string
+                Wheter to calculate in the eigenbasis (permuted, not permuted) of the Jacobian or in the physical basis.
         
         Returns:
         ----------
             individual_shift_matrices : list[np.ndarray]
                 List of individual shift matrices for each desired eigenvalue shift.
         """
-        left_generators, right_generators = self.calculate_shift_matrix_generators(in_eigenspace=in_eigenspace)
+        permutation, left_generators, right_generators = self.calculate_shift_matrix_generators(space = space)
         individual_shift_matrices= [np.outer(p_i, q_i) for p_i, q_i in zip(left_generators, right_generators)] 
-        return individual_shift_matrices
+        matrix_permutation= (permutation[:,None],permutation[None,:])
+        #print(f"In {space}-space the left-generators are {left_generators} and the right generators are {right_generators} and the individual shift matrices are {individual_shift_matrices}")
+        return matrix_permutation, individual_shift_matrices
 
     def construct_shift_matrix(self) -> np.ndarray:
         """
@@ -425,7 +454,7 @@ class ShiftMatrix:
         shift_matrix : np.ndarray
             The constructed shift matrix.
         """
-        p, q = self.calculate_shift_matrix_generators()
+        permutation, p, q = self.calculate_shift_matrix_generators()
         self.shift_matrix = sum(np.outer(p_i, q_i) for p_i, q_i in zip(p, q))
 
         return self.shift_matrix
@@ -472,7 +501,7 @@ if __name__ == "__main__":
     shift_matrix_generator = ShiftMatrix(model=model)
 
     # Generate shift matrix
-    eigenvalue_indices = [1, 2]
+    eigenvalue_indices = [2, 5]
     shifts = np.array([-0.5, 0.3])
     zero_rows = np.array([1,2],dtype=int)
     zero_cols = np.array([],dtype=int)
