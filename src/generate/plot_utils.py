@@ -462,13 +462,16 @@ def shift_matrix_construction_visualization_subplots(shift_matrix_obj:ShiftMatri
     axes_layered[1,0].axis('off')
     axes_layered[0,0].axis('off')
     if space is "eigen":
-        axes_layered[1,1].set_xlabel(r"$V(J+\sum_{i}\vec{p}_{i}\vec{q}_i^T)V^{-1}$", fontsize=fs)
+        axes_layered[1,1].set_xlabel(r"$VJV^{-1}$"+"\n"+r"+$V\sum_{i}\vec{p}_{i}\vec{q}_i^T)V^{-1}$", fontsize=fs)
+        #axes_layered[1,1].set_xlabel(r"$V(J+\sum_{i}\vec{p}_{i}\vec{q}_i^T)V^{-1}$", fontsize=fs)
         panel_label=rf"{chr(97+2*n_individual_shift_matrices+3)}"
     elif space is "physical":
         axes_layered[1,1].set_xlabel(r"$J+\sum_{i}\vec{p}_{i}\vec{q}_i^T$", fontsize=fs)
         panel_label=rf"{chr(97+n_individual_shift_matrices+1)}"
     elif space is "permutation":
-        axes_layered[1,1].set_xlabel(r"$\pi V(J+\sum_{i}\vec{p}_{i}\vec{q}_i^T)V^{-1}\pi^{-1}$", fontsize=fs)
+        #axes_layered[1,1].set_xlabel(r"$\pi VJ(\pi V)^{-1}$"+"\n"+r"$+\pi V\sum_{i}\vec{p}_{i}\vec{q}_i^T(\pi V)^{-1}$", fontsize=fs)
+        axes_layered[1,1].set_xlabel(r"$\widetilde VJ\widetilde V^{-1}$"+"\n"+r"+$\widetilde V\sum_{i}\vec{p}_{i}\vec{q}_i^T)\widetilde V^{-1}$", fontsize=fs)
+        #axes_layered[1,1].set_xlabel(r"$\widetilde V(J\widetilde +\sum_{i}\vec{p}_{i}\vec{q}_i^T))\widetilde V^{-1}$", fontsize=fs)
         panel_label=rf"{chr(97+3*n_individual_shift_matrices+5)}"
     axes_layered[1,1].annotate(rf"\textbf{{{panel_label}}}", (-1.5, 8.5), fontsize=fs, annotation_clip=False)
     #visualize_matrix(matrix=jacobian, axs=axes_layered, color=jac_color, log=log, absolute=absolute, fs=fs, cutoff=cutoff, min_max=min_max, size=size)
@@ -477,7 +480,7 @@ def shift_matrix_construction_visualization_subplots(shift_matrix_obj:ShiftMatri
     saving_paths=[]
 
     # Visualize jacobian in eigenspace and physical space
-
+    add_pcolormesh(axes_layered[1,1],jacobian, color=jac_color, log=log, absolute=absolute, cutoff=cutoff, min_max=min_max)
     if space is "eigen":
         panel_label=rf"{chr(97+n_individual_shift_matrices+2)}"
         labels=[None,None,r"$VJV^{-1}$",rf"\textbf{{{panel_label}}}",r"eigenspace \n of $J$"]
@@ -486,9 +489,9 @@ def shift_matrix_construction_visualization_subplots(shift_matrix_obj:ShiftMatri
         labels=[None,None,r"$J$",rf"\textbf{{{panel_label}}}",r"physical space"]
     elif space is "permutation":
         panel_label=rf"{chr(97+2*n_individual_shift_matrices+4)}"
-        labels=[None,None,r"$\pi VJV^{-1}\pi^{-1}$",rf"\textbf{{{panel_label}}}", r"\permuted \n eigenspace \n of $J$"]
+        #labels=[None,None,r"$\pi VJ(\pi V)^{-1}$",rf"\textbf{{{panel_label}}}", r"\permuted \n eigenspace \n of $J$"]
+        labels=[None,None,r"$\widetilde VJ\widetilde V^{-1}$",rf"\textbf{{{panel_label}}}", r"\permuted \n eigenspace \n of $J$"]
     saving_paths.append(visualize_matrix(matrix=jacobian, label=labels, color=jac_color, log=log, absolute=absolute, fs=fs, cutoff=cutoff, name=f"{space}_jacobian.svg", save_dir=save_dir, min_max=min_max, size=size))
-    
 
     # looping over individual shift matrices to visualize their construction one by one
 
@@ -513,10 +516,19 @@ def shift_matrix_construction_visualization_subplots(shift_matrix_obj:ShiftMatri
                       rf"\textbf{{{panel_label}}}"]
         if space is "permutation":
             panel_label=rf"{chr(102+2*n_individual_shift_matrices+index)}"
-            labels = [rf"$\pi V\vec{{{p}}}_{{{index+1}}}$",
+            if False:
+                labels = [rf"$\pi V\vec{{{p}}}_{{{index+1}}}$",
                        rf"$\vec{{{q}}}_{{{index+1}}}^TV^{{{-1}}}\pi^{{{-1}}}$",
                          f"$\\pi V\\vec{{{p}}}_{{{index+1}}}\\vec{{{q}}}_{{{index+1}}}^TV^{{{-1}}}\\pi^{{{-1}}}$",
                          rf"\textbf{{{panel_label}}}"]
+                labels = [rf"$\pi V\vec{{{p}}}_{{{index+1}}}$",
+                                   rf"$\vec{{{q}}}_{{{index+1}}}^T(\pi V)^{{{-1}}}$",
+                                     f"$\\pi V\\vec{{{p}}}_{{{index+1}}}\\vec{{{q}}}_{{{index+1}}}^T(\pi V)^{{{-1}}}$",
+                                     rf"\textbf{{{panel_label}}}"]
+            labels = [rf"$\widetilde V\vec{{{p}}}_{{{index+1}}}$",
+                                   rf"$\vec{{{q}}}_{{{index+1}}}^T\widetilde V^{{{-1}}}$",
+                                     f"$\\widetilde V\\vec{{{p}}}_{{{index+1}}}\\vec{{{q}}}_{{{index+1}}}^T\\widetilde V^{{{-1}}}$",
+                                     rf"\textbf{{{panel_label}}}"]
         add_pcolormesh(axes_layered[1,1], individual_shift_matrices[index], color=shift_colors[index], log=log, absolute=absolute, cutoff=cutoff, min_max=min_max)
         saving_paths.append(visualize_matrix(left_vec=left_generators[index], right_vec=right_generators[index],label=labels, color=shift_colors[index], log=log, fs=fs, cutoff=cutoff, name=f"{space}_shift_component_{index+1}.svg", save_dir=save_dir, min_max=min_max,size=size))
 
@@ -583,6 +595,13 @@ def compose_shift_matrix_construction_visualization_horizontal(shift_matrix_obj:
         combined_fig = sg.SVGFigure("4.3in","2.2in")
         size=(1.25,1.25)
         scale=100
+    elif type=="new":
+        combined_fig = sg.SVGFigure("3.5in","2in")
+        size=(1.1,1.1)
+        scale=90
+
+    #grid for alignment
+        #combined_fig.append(sc.Grid(20,20)) # visual grid for ease of aligning figures
 
     # generate the subfigures based on the properties of shift_matrix_obj
     file_paths_physical=shift_matrix_construction_visualization_subplots(shift_matrix_obj, space="physical", log=log, absolute=absolute, fs=fs, cutoff=1e-4, jac_color=jac_color, size=size,flipped=flipped)
@@ -590,9 +609,6 @@ def compose_shift_matrix_construction_visualization_horizontal(shift_matrix_obj:
     if show_permutation:
         file_paths_permutation=shift_matrix_construction_visualization_subplots(shift_matrix_obj, space="permutation", log=log, absolute=absolute, fs=fs, cutoff=1e-4, jac_color=jac_color, size=size,flipped=flipped)
     
-    
-    
-    #combined_fig.append(sc.Grid(20,20)) # visual grid for ease of aligning figures
 
     # helper function to loop over, load and add all the generated SVGs to the figure, with appropriate positioning and scaling
     def add_svg_row_to_figure(fig,file_paths, row_count=0, scale=80,equation_mode=True):
@@ -655,9 +671,9 @@ def compose_shift_matrix_construction_visualization_horizontal(shift_matrix_obj:
                     equal=sg.TextElement(x_0+scale+5,y_0+scale/2+10,"=",size=10)
                     symbols.append(equal)
                 fig.append(symbols)
-            if row_count > 0:
-                line=sc.Line([(0,scale*1.1*row_count),(scale*len(file_paths_physical),scale*1.1*row_count)],width=0.8)
-                combined_fig.append([line])
+        if row_count > 0:
+            line=sc.Line([(0,scale*1.1*row_count),(scale*len(file_paths_physical),scale*1.1*row_count)],width=0.8)
+            combined_fig.append([line])
 
                 
     add_svg_row_to_figure(combined_fig, file_paths_eigenspace, row_count=1,scale=scale, equation_mode=equation_mode)
@@ -675,7 +691,7 @@ def compose_shift_matrix_construction_visualization_horizontal(shift_matrix_obj:
     combined_fig.save(save_dir)
     png_path=os.path.join(shift_matrix_obj.current_dir,f"combined_horizontal_{type}_{"permutation" if show_permutation else ""}.png")
     svg2png(url=save_dir,write_to=png_path,
-            parent_height=scale*1.1*row_count,parent_width=scale*(len(file_paths_eigenspace)),output_height=scale*1.1*row_count,output_width=scale*(len(file_paths_eigenspace)))
+            parent_height=scale*1.1*row_count,parent_width=scale*(len(file_paths_eigenspace)),output_height=scale*1.1*row_count,output_width=1.05*scale*(len(file_paths_eigenspace)))
     return save_dir
 
 
@@ -1400,6 +1416,12 @@ def compute_psd_from_traj(t, vals, steady_state_t=500):
     """
     Computes the power spectral density from a trajectory using scipy.signal.welch.
     """
+    if np.max(t)< steady_state_t-100:
+        print(f"WARNING: The function making this print is agnostic of your chosen alpha value, however if it is 0.01 as it should be for realistic power grids," \
+                "and the transient go with e**(-alpha *t) equilibrium with transients only one percent of the original size do not occur before time ~t>460. "\
+                    "the maximum time is {np.max(t)}, so the sample size for steady-state power spectral density computation is either non existent or critically small."\
+                        "Hence the first entry considered for psd compuation is set to {np.max(t)-100}.")
+        steady_state_t= np.max(t)-100
     steady_idx=np.argmin(np.abs(t-steady_state_t))
     t=t[steady_idx:]
     vals=vals[:,steady_idx:]
@@ -1452,7 +1474,7 @@ def generate_or_fetch_scenario_data(t_final: float, args, model: BaseModel, y_0=
             save_dir=model.current_dir
         else:
             save_dir=shift[1][0].current_dir
-    filepath = os.path.join(save_dir,meta_scenario_name)+"_tfinal"+str(t_final)+".npz"
+    filepath = os.path.join(save_dir,meta_scenario_name)+"_tfinal"+str(t_final)+"_tonset"+str(int(pert[1][3]))+".npz"
 
     
 
@@ -1482,7 +1504,7 @@ def generate_or_fetch_scenario_data(t_final: float, args, model: BaseModel, y_0=
         t, ys_shifted = dynamics.integrate_f(t_final, y_0, instance+pert+shift, t_0=0, steps=steps)
 
 
-    #plt.plot(t,ys_shifted)
+    
     #plt.show()
     if False:
         # fix point deviation
@@ -1695,7 +1717,7 @@ if __name__ == "__main__":
     zero_cols = np.array([],dtype=int)
     shift_matrix_obj.construct_from_scratch(eigenvalue_indices, shifts, zero_rows, zero_cols)
     #compose_shift_matrix_construction_visualization_vertical(shift_matrix_obj, log=True, absolute=True,fs=10, jac_color=darkblue,overwrite=True)
-    compose_shift_matrix_construction_visualization_horizontal(shift_matrix_obj, log=True, absolute=True,fs=10, jac_color=darkblue,overwrite=True,type="shift",flipped=True, show_permutation=True)
+    compose_shift_matrix_construction_visualization_horizontal(shift_matrix_obj, log=True, absolute=True,fs=12, jac_color=darkblue,overwrite=True,type="new",flipped=True, show_permutation=True)
     compose_shift_matrix_construction_visualization_horizontal(shift_matrix_obj, log=True, absolute=True,fs=10, jac_color=darkblue,overwrite=True,type="shift",flipped=True, show_permutation=False)
     
     time_series_and_psd("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\50Hz\\201105_Frequenz.txt")

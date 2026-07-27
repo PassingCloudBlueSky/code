@@ -432,7 +432,7 @@ def plot_network(
                         linestyle=vtn_edge_style,
                         color=shift_colors[shift_number] if vtn_color is None else vtn_color,
                         alpha=1.,
-                        linewidth=np.average(edge_widths)
+                        linewidth=np.average(edge_widths)*2
                     )
 
         # Highlight vtn nodes if provided
@@ -1042,6 +1042,7 @@ def v_line_locations_from_shift(model:sokm, shift_matrix_obj:ShiftMatrix):
 
     return np.concatenate([frequencies_prior, frequencies_post_theo]), np.concatenate([pre_color, post_color])
 
+
 def break_axes(axes, size=6):
     axes[0].spines.right.set_visible(False)
     axes[1].spines.left.set_visible(False)
@@ -1050,6 +1051,7 @@ def break_axes(axes, size=6):
               linestyle="none", color='k', mec='k', mew=1, clip_on=False)
     axes[0].plot([1, 1], [1, 0], transform=axes[0].transAxes, **kwargs)
     axes[1].plot([0, 0], [0, 1], transform=axes[1].transAxes, **kwargs)
+
 
 def network_w_response(scenario, 
                        model:sokm, 
@@ -1074,7 +1076,7 @@ def network_w_response(scenario,
                        panel="a",
                        fontsize=10):
     shift_matrix_obj = scenario[3][0] if vtn_on else None
-    pert_amplitude, pert_freq, pert_node= scenario[1]
+    pert_amplitude, pert_freq, pert_node, onset_t= scenario[1]
 
     transient = len(axes)==3
     t_window_steady= t_window/2 if transient else t_window
@@ -1101,7 +1103,6 @@ def network_w_response(scenario,
         vals=np.zeros((np.shape(model.jacobian_matrix)[0],steps+1))
         vals=dynamics.sine_perturbation_single_node(t,vals[:,0],scenario[1])
         node = pert_node # setting node i.e. the of vals which we plot to the index of perturbed node
-
     # calculate steady state response psd for each node
     t_traj_index=np.abs(t - t_final + t_window_steady).argmin() 
     freqs, psd = compute_psd_from_traj(t[t_traj_index:], vals[:,t_traj_index:]) 
@@ -1139,7 +1140,7 @@ def network_w_response(scenario,
             model,
             shift_matrix_obj= shift_matrix_obj,
             seed=42,
-            vtn_edge_style="dashed",
+            vtn_edge_style=(0,(1,1)),
             vtn_color=scenario_color,
             #vtn_color="#294e62ff",
             name="network.svg", 
@@ -1173,7 +1174,7 @@ def network_w_response(scenario,
     axes[0].set_ylim(min_max)
     if transient:
         axes[1].set_ylim(min_max)
-        axes[0].set_xticks([ np.round(np.min(t)) , np.round(0.8*t_window) ])
+        axes[0].set_xticks([ np.round(np.min(t)) , np.round(onset_t), np.round(0.8*t_window) ])
     axes[0].set_yticks(np.round(min_max if only_perturbation else (0.,min_max[1]),decimals=1))
 
     axes[0+transient].set_xticks([np.round(t_window_steady*0.2+np.min(t[t_traj_index:])),np.max(t[t_traj_index:])])
@@ -1189,7 +1190,6 @@ def network_w_response(scenario,
             axes[1+transient].vlines(pert_freq,0,pert_amplitude, color="black", linewidth=linewidth,alpha=1)
         else:
             for i, freq in enumerate(pert_freq):
-                print(f"plotting vline at {freq}")
                 axes[1+transient].vlines(freq,0,pert_amplitude, color="black", linewidth=linewidth,alpha=1)
     else:
         S = None
@@ -1345,7 +1345,7 @@ def vtn_scenario_powers(t_final,t_window,scenario,model,axes,absolute=False, sav
     #axes[1].set_xticks([])
     if transient:
         axes[0].set_xlim(np.min(t),t_window)
-        axes[0].set_xticks([ np.round(np.min(t)) , np.round(0.8*t_window) ])
+        axes[0].set_xticks([ np.round(np.min(t)) , np.round(scenario[1][3]) , np.round(0.8*t_window) ])
     axes[0+transient].set_xlim((np.round(t[t_traj_index]),t_final))
     axes[0+transient].set_xticks([np.round(t_window_steady*0.2+np.min(t[t_traj_index:])),np.max(t[t_traj_index:])])
     axes[1+transient].set_xlabel(r"$t$")
@@ -1368,7 +1368,6 @@ def vtn_scenario_powers(t_final,t_window,scenario,model,axes,absolute=False, sav
     #axes[1].set_yticks(y_vals,labels=y_ticks)
     #axes[2].set_yticks(y_vals_avrg,labels=y_ticks)
     axes[0].set_ylabel(r"$P_{\mathrm{s}}/{P_{\mathrm{p}}}$")
-    print("setting power y ticks to", y_ticks)
     axes[0].set_yticks(y_ticks)
     axes[1+transient].set_yticks(y_ticks)
     axes[1+transient].set_ylabel(r"$\overline{P}_{\mathrm{s}}/{P_{\mathrm{p}}}$")
@@ -1405,7 +1404,7 @@ def vtn_scenario_powers(t_final,t_window,scenario,model,axes,absolute=False, sav
     #return svg_path
 
 
-def individual_shift_scenarios(shift_matrix_obj, pert_amplitude, pert_node, flip=False):
+def individual_shift_scenarios(shift_matrix_obj, pert_amplitude, pert_node, flip=False, onset_t=0.):
     """
     Helper function that generates a sine perturbation scenario for each individual shift matrix in shift_matrix_object.
     """
@@ -1432,14 +1431,14 @@ def individual_shift_scenarios(shift_matrix_obj, pert_amplitude, pert_node, flip
     for i, ism in enumerate(individual_shift_matrices):
         shift_args = (ism, model, None)
         shift = (dynamics.jacobian_shift, shift_args)
-        pert = (dynamics.sine_perturbation_single_node, (pert_amplitude,all_orig_freqs[eigval_indices[i]],pert_node))
+        pert = (dynamics.sine_perturbation_single_node, (pert_amplitude,all_orig_freqs[eigval_indices[i]],pert_node, onset_t))
         individual_scenarios.append(pert+shift)
 
     if len(individual_shift_matrices)>1:
         shift_args = (shift_matrix_obj.shift_matrix, model, None)
         shift = (dynamics.jacobian_shift, shift_args)
         pert_freqs=all_orig_freqs[eigval_indices]
-        pert = (dynamics.sine_perturbation_single_node, (pert_amplitude,pert_freqs,pert_node))
+        pert = (dynamics.sine_perturbation_single_node, (pert_amplitude,pert_freqs,pert_node,onset_t))
         individual_scenarios.append(pert+shift)
 
     return individual_scenarios
@@ -1464,7 +1463,8 @@ def scenario_panel_recursive(model,
                              panel="a",
                              cmap="coolwarm",
                              linewidth=1.,
-                             transient=True
+                             transient=True, 
+                             onset_t = 1.
                              ):
     
     # allows for calling with a specific scenario, but also just with a shift matrix object
@@ -1487,7 +1487,7 @@ def scenario_panel_recursive(model,
         if len(shift_matrix_obj.shifts)>1 or scenario_provided is False:
 
             # generate individual shift scenarios, the corresponding colors
-            individual_scenarios= individual_shift_scenarios(shift_matrix_obj,amplitude,pert_node=pert_node)
+            individual_scenarios= individual_shift_scenarios(shift_matrix_obj,amplitude,pert_node=pert_node, onset_t=onset_t)
             #individual_scenarios=individual_scenarios[::-1] # reverse order for plotting
             n_scenarios=len(individual_scenarios)
             scenario_colors=create_shift_colors(n_scenarios-1)
@@ -1514,7 +1514,7 @@ def scenario_panel_recursive(model,
                                         fontsize=fontsize,
                                         plot_real_psd=plot_real_psd,
                                         labels=labels,
-                                        panel=chr(98+n_scenarios-i-2) if i<n_scenarios-1 or n_scenarios==1 else chr(101+2*i),
+                                        panel=chr(98+n_scenarios-i-2) if (i<n_scenarios-1 or n_scenarios==1) else chr(97+3*(n_scenarios+1)),
                                         t_window=t_window,
                                         linewidth=linewidth,
                                         transient=True if i == 1 else False)
@@ -1668,7 +1668,6 @@ def scenario_panel_recursive(model,
 
         # saving the panel
         
-        power_plot_name=specific_name
         specific_name+=f"_node{node}"
         svg_path=save_figure(fig, save_dir=save_dir, name=specific_name+".svg")
         png_path=os.path.join(save_dir,specific_name+".png")
@@ -1848,12 +1847,13 @@ if __name__ == "__main__":
                              save_dir=None, 
                              specific_name="scenario_panel", 
                              overwrite=False,
-                             node=1, 
+                             node=4, 
                              t_window=10,
                              pert_node=perturbed_node,
-                             labels=False,
+                             labels=True,
                              fontsize=10,
-                             plot_real_psd=False
+                             plot_real_psd=False,
+                             onset_t=2
                              )
     # noise or driving, what is the difference?
     # ways forward: 

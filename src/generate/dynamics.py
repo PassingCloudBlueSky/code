@@ -125,6 +125,8 @@ def sine_perturbation_single_node(t,y,args):
                 The frequency of the cosine perturbation.
             - node_index: int
                 The index of the state variable to which the perturbation should be applied.
+            - onset_t: float
+                Time of the onset of the perturbation. Before t reaches onset_t all returned perturabtion values are 0.
 
         Returns:
         -------
@@ -132,23 +134,28 @@ def sine_perturbation_single_node(t,y,args):
             The computed cosine perturbation value based on the current time applied to the specified node index in the state vector.
         """
 
-        amplitude, frequency, node_index = args
+        amplitude, frequency, node_index, onset_t = args
 
         # Example perturbation: a simple cosine function of time with given amplitude and frequency
         if np.isscalar(t):
             perturbation_vector = np.zeros_like(y)
+            t -= onset_t
+            if t < 0.:
+                t = 0.
             if np.isscalar(frequency):
-                perturbation_vector[node_index] = amplitude * np.sin( frequency * t)
+                perturbation_vector[node_index] = amplitude * np.sin( frequency*t)
             else:
                 for f in frequency:
                     perturbation_vector[node_index] += amplitude * np.sin( f * t)
         else:
             perturbation_vector = np.zeros((len(y),len(t)))
+            t_incl_onset = t - onset_t
+            t_incl_onset[t_incl_onset<0.] = 0.
             if np.isscalar(frequency):
-                perturbation_vector[node_index,:] = amplitude * np.sin( frequency * t)
+                perturbation_vector[node_index,:] = amplitude * np.sin( frequency * t_incl_onset)
             else:
                 for f in frequency:
-                    perturbation_vector[node_index,:] += amplitude/len(frequency) * np.sin( f * t)
+                    perturbation_vector[node_index,:] += amplitude/len(frequency) * np.sin( f * t_incl_onset)
             #perturbation_vector[node_index,:] = amplitude * np.sin( frequency * t)
         # TODO: loop over node_indices if node_index is array of int
         
