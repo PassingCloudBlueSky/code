@@ -7,7 +7,8 @@ import scipy.linalg as la
 from typing import List, Tuple, Optional
 from kuramoto_class import SecondOrderKuramotoModel as sokm 
 from base_model import BaseModel
-
+from numba import njit
+from numba.core.dispatcher import Dispatcher as _NumbaDispatcher
 
 
 class ShiftMatrix:
@@ -32,6 +33,7 @@ class ShiftMatrix:
             if model.current_dir is None:
                 model.save_parameters()
             self.current_dir=model.current_dir
+            self.model=model
         elif jacobian is not None and current_dir is not None:
             self.jacobian = jacobian
             self.current_dir = current_dir
@@ -50,6 +52,7 @@ class ShiftMatrix:
         self.nus: Optional[np.ndarray] = None
         self.eigenvalue_indices: Optional[np.ndarray] = None
         self.shifts: Optional[np.ndarray] = None
+        self.model: Optional[BaseModel] = None
 
 
 
@@ -200,11 +203,19 @@ class ShiftMatrix:
 
         # search for largest entry, pick it as a vtn node, remove the corresponding row from the eigenvectors and repeat for other eigenvalues until all are processed.
         def find_largest_entry_and_remove_row(eigenvectors, num_vtn_nodes=num_vtn_nodes):
+            """
+            Helper function to find the largest entry in the eigenvectors and remove the corresponding row, while storing the corresponding row index.
+            The resulting index list of largest entries is returned.
+            """
+
             vtn_nodes = []
             while eigenvectors.shape[1]>0 and len(vtn_nodes)<num_vtn_nodes:
                 max_index = np.unravel_index(np.abs(eigenvectors).argmax(), eigenvectors.shape)
                 largest_entry_row = max_index[0]
-                vtn_nodes.append(largest_entry_row)
+                for node in vtn_nodes:
+                    if node <= largest_entry_row:
+                        largest_entry_row += 1
+                vtn_nodes.append(largest_entry_row) 
                 eigenvectors = np.delete(eigenvectors, largest_entry_row, axis=0)
                 eigenvectors = np.delete(eigenvectors, max_index[1], axis=1)
             return vtn_nodes
@@ -487,6 +498,8 @@ class ShiftMatrix:
         self.construct_shift_matrix()
         self.save_to_file(zr=zero_rows,zc=zero_cols)
         return self.shift_matrix
+
+    
 
 
 

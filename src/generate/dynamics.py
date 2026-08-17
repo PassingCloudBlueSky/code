@@ -133,8 +133,11 @@ def sine_perturbation_single_node(t,y,args):
         perturbation_value: array-like
             The computed cosine perturbation value based on the current time applied to the specified node index in the state vector.
         """
-
-        amplitude, frequency, node_index, onset_t = args
+        seed= 42
+        if len(args) == 4:
+            amplitude, frequency, node_index, onset_t = args
+        elif len(args) == 5:
+            amplitude, frequency, node_index, onset_t, seed = args
 
         # Example perturbation: a simple cosine function of time with given amplitude and frequency
         if np.isscalar(t):
@@ -145,8 +148,11 @@ def sine_perturbation_single_node(t,y,args):
             if np.isscalar(frequency):
                 perturbation_vector[node_index] = amplitude * np.sin( frequency*t)
             else:
-                for f in frequency:
-                    perturbation_vector[node_index] += amplitude * np.sin( f * t)
+                for i,f in enumerate(frequency):
+                    if np.isscalar(amplitude):
+                        perturbation_vector[node_index] += amplitude * np.sin( f * t)
+                    else:
+                        perturbation_vector[node_index] += amplitude[i] * np.sin( f * t)
         else:
             perturbation_vector = np.zeros((len(y),len(t)))
             t_incl_onset = t - onset_t
@@ -154,8 +160,15 @@ def sine_perturbation_single_node(t,y,args):
             if np.isscalar(frequency):
                 perturbation_vector[node_index,:] = amplitude * np.sin( frequency * t_incl_onset)
             else:
-                for f in frequency:
-                    perturbation_vector[node_index,:] += amplitude/len(frequency) * np.sin( f * t_incl_onset)
+                rng = np.random.default_rng(seed)
+                if np.isscalar(amplitude):
+                    amplitude = np.full(len(frequency), amplitude/len(frequency))
+                phases = 2* np.pi * rng.random(len(amplitude))
+                for i,f in enumerate(frequency):
+                    if np.isscalar(amplitude):
+                        perturbation_vector[node_index,:] += amplitude/len(frequency) * np.sin( f * t_incl_onset+phases[i]*(t_incl_onset>0.))
+                    else:
+                        perturbation_vector[node_index,:] += amplitude[i]/len(frequency) * np.sin( f * t_incl_onset +phases[i]*(t_incl_onset>0.))
             #perturbation_vector[node_index,:] = amplitude * np.sin( frequency * t)
         # TODO: loop over node_indices if node_index is array of int
         

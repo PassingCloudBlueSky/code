@@ -1,6 +1,7 @@
 from platform import node
 
 from matplotlib.pylab import False_, eig
+from numpy._core.arrayprint import format_float_scientific
 
 from plot_utils import *
 from typing import Optional
@@ -52,192 +53,7 @@ def generate_frequency_range(model:sokm,extra_scope=0.2):
     upper_bound+=puffer
     return np.linspace(lower_bound,upper_bound,num=1000) #frequency values over which we plot
 
-
-def resonance_plot(model: sokm,
-                   shift_matrix_obj: Optional[ShiftMatrix]=None,
-                   name="resonance_plot.svg",
-                   omega=None, 
-                   pert_band=None,
-                   min_max=None,
-                   log=False,
-                   extra_scope=0.2,
-                   show_resonance_location=False,
-                   fs=6,
-                   lw=1,
-                   alpha=0.8,
-                   x_axis_off=False,
-                   perturbed_node=6,
-                   noise_object=None):
-    """
-    Creates a resonance plot for a network with Jacobian J and a perturbation at node k. 
-    Plots the frequency-dependent response amplitudes for all nodes in the network over a 
-    specified frequency range. Optionally displays resonance frequency peaks and perturbation bands.
-                Parameters
-                ----------
-                model : sokm
-                    The network model containing the second order Kuramoto model Jacobian and system dynamics.
-                shift_matrix_obj : Optional[ShiftMatrix], default=None
-                    Optional shift matrix object for eigenvalue manipulation. If provided, shifted resonance
-                    frequencies are displayed. Those shifted with corresponding colors.
-                name : str, default="resonance_plot.svg"
-                    Filename for the saved plot.
-                omega : array-like, optional
-                    Frequency array for the x-axis. If None, automatically generated based on the model's
-                    resonant behavior with extra_scope padding.
-                pert_band : tuple[float, float], optional
-                    Perturbation band region as (start_frequency, width) to highlight in the plot.
-                min_max : tuple[float, float], optional
-                    Y-axis limits as (min_value, max_value). If None, limits are set automatically.
-                log : bool, default=False
-                    If True, use logarithmic scale for the y-axis.
-                extra_scope : float, default=0.2
-                    Extra frequency range padding (relative to resonant region) when auto-generating omega.
-                show_resonance_location : bool, default=False
-                    If True, display dashed vertical lines at resonance frequency peaks. Colors indicate
-                    whether peaks correspond to shifted eigenvalues.
-                fs : int, default=6
-                    Fontsize for axis labels and tick labels.
-                lw : float, default=1
-                    Linewidth for response amplitude curves.
-                alpha : float, default=0.8
-                    Transparency level for response amplitude curves.
-                x_axis_off : bool, default=False
-                    If True, hide x-axis ticks and labels.
-                perturbed_node : int, default=6
-                    Index of the perturbed node for which response is calculated.
-                Returns
-                -------
-                str
-                    Path to the saved plot file.
-    """    
-    
-    # generate frequency array omega in the area of resonant behavior unless provided as parameter
-    if omega==None:
-        omega=generate_frequency_range(model,extra_scope=extra_scope)
-
-    # fetch shift matrix
-    if shift_matrix_obj is not None:
-        S=shift_matrix_obj.shift_matrix
-    else:
-        S=None
-
-    response_vals=model.calculate_response_amplitudes(omega,S=S,k=perturbed_node)
-    
-
-    # loop over all nodes, and plot their freuquency dependent response amplitudes into one graph
-    fig,ax=plt.subplots(1, 1,figsize=(2.1, 0.7))
-    psd_color="gold"
-    response_color=green
-
-    # plot power spectral densities of the perturbation if provided as parameter
-    if noise_object is not None:
-        twin_ax=ax.twinx()
-        for i in range(noise_object.psd.ndim):
-            twin_ax.plot(2*np.pi*noise_object.freqs,noise_object.psd[i,:] if noise_object.psd.ndim > 1 else noise_object.psd,"o",markersize=0.5,alpha=1.,color=psd_color,linewidth=lw*0.5)
-        
-    # option to visualize the resonance frequency peaks with dashed vertical lines
-    if show_resonance_location:
-
-        # fetching colors of individual shifts if shifted
-        if shift_matrix_obj!=None:
-            shift_colors=create_shift_colors(len(shift_matrix_obj.eigenvalue_indices))
-        
-        # locations of resonance peaks
-        resonance_frequencies=model.predict_resonance_frequencies(S=S)
-
-        # looping over all peaks to add the vertical line to the plot
-        for i, current_frequency in enumerate(resonance_frequencies):
-            line_color="grey"
-            v_alpha=0.5
-
-            # checking if shifted
-            if shift_matrix_obj!=None:
-                
-                # calculating the predictions for the shifted resonance frequencies
-                shifted_eigvals=shift_matrix_obj.eigenvalues[shift_matrix_obj.eigenvalue_indices]+shift_matrix_obj.shifts
-                shifted_resonance_frequencies=model.predict_resonance_frequencies(shifted_eigvals=shifted_eigvals)
-
-                # creating a boolean array with as many entries as shifts. A True entry means that the current resonance frequency is in 1e-8 proximity to the predicted resoannce frequency of the shift
-                rel_diffs = np.abs(shifted_resonance_frequencies - current_frequency) / np.abs(current_frequency)
-                in_tol = rel_diffs < 1e-8
-
-                # if the current resonance frequency corresponds to any predicted resonance frequency
-                if np.any(in_tol):
-                    # set the line color  to the shift color of that resonance frequency
-                    line_color=shift_colors[np.where(in_tol)[0][0]]
-                    v_alpha=1
-
-            # draw vertical line
-            ax.axvline(x=current_frequency,linestyle="dashed",color=line_color,alpha=v_alpha,linewidth=1.)
-
-    
-    # Drawing perturbation band if provided
-    if pert_band!=None and noise_object is None: 
-        rect=plt.Rectangle((pert_band[0],0), pert_band[1], 20*np.max(response_vals), color=psd_color,alpha=0.3,edgecolor=None)
-        ax.add_patch(rect)
-
-    # loop over all nodes, and plot their freuquency dependent response amplitudes into one graph
-    for i in range(len(response_vals[:,0])): #loop over all nodes
-        ax.plot(omega,response_vals[i,:],alpha=alpha,color=response_color,linewidth=lw)
-
-    # log or not log that is the question
-    if log: 
-        #plt.xscale("log")
-        ax.set_yscale("log")
-        ax.set_ylim(bottom=0.8*np.min(response_vals))
-        ax.set_ylabel("$A_n$",fontsize=fs)
-        if noise_object is not None:
-            twin_ax.set_yscale("log")
-            twin_ax.set_ylim(bottom=0.8*np.min(noise_object.psd))
-            twin_ax.set_ylabel("PSD",fontsize=fs,color=psd_color)
-            ax.set_ylabel("$A_n$",fontsize=fs,color=response_color,alpha=1.)
-    else:
-        ax.set_ylim(bottom=0)
-        ax.set_ylabel("$A_n$",fontsize=fs)
-
-    if x_axis_off:
-        ax.tick_params(
-            axis='x',          # changes apply to the x-axis
-            which='both',      # both major and minor ticks are affected
-            bottom=False,      # ticks along the bottom edge are off
-            top=False,         # ticks along the top edge are off
-            labelbottom=False) # labels along the bottom edge are off
-        if noise_object is not None:
-            twin_ax.tick_params(
-                axis='x',          # changes apply to the x-axis
-                which='both',      # both major and minor ticks are affected
-                bottom=False,      # ticks along the bottom edge are off
-                top=False,         # ticks along the top edge are off
-                labelbottom=False) 
-    else:
-        ax.set_xlabel("$\omega$",fontsize=fs)
-
-    # aesthetics
-    ax.set_xlim((omega[0],omega[-1]))
-    if min_max!=None:
-        ax.set_ylim(min_max)
-    ax.tick_params(axis='x', labelsize=fs)
-    ax.tick_params(axis='y', labelsize=fs)
-    if noise_object is not None:
-        twin_ax.tick_params(axis='y', labelsize=fs, color=psd_color,labelcolor=psd_color)
-        response_color=response_color[:3]
-        ax.tick_params(axis='y', labelcolor=response_color)
-    for axis in ['top','bottom','left','right']: #thicker axis
-        ax.spines[axis].set_linewidth(0.6)
-    ax.set_facecolor("white")
-
-    # ascertaining existence of model instance directory
-    if model.current_dir == None:
-        model.save_parameters()
-
-    if shift_matrix_obj!=None:
-        save_dir=shift_matrix_obj.current_dir
-    else:
-        save_dir = model.current_dir
-    save_path=save_figure(fig, save_dir, name=name)
-    return save_path
-
-    
+   
 def plot_network(
     model: sokm,
     shift_matrix_obj: Optional[ShiftMatrix]= None,
@@ -497,552 +313,6 @@ def plot_network(
         return svg_path
 
 
-
-def perturbation_band_location_from_shift(model:sokm, shift_matrix_obj:ShiftMatrix, buffer=0.05):
-    """
-    Reverse engineers the left edge and width of a perturbation band that justifies shifting the eigenvalues with shift_matrix_obj.
-
-    Parameters
-    -------
-    model: sokm
-        Second Order Kuramoto Model instance from which the resonant frequencies are collected.
-    shift_matrix_obj: ShiftMatrix
-        ShiftMatrix instance in which a shift applied to model is stored. 
-    buffer:
-        Closest distance between perturbation band edges and the predicted resonance frequencies inside the perturbation band. 
-
-    Returns
-    ----------
-    tuple[float, float]
-        Tuple of the left edge value of the perturbation band and the perturbation band's width
-    """
-
-
-    # fetch shift indices and determine edge indices
-    shift_indices=shift_matrix_obj.eigenvalue_indices
-    min = np.min(shift_indices)
-    max= np.max(shift_indices)
-
-    # fetch corresponding predicted resonance frequencies to calculate left edge of perturbation band its width. Extend with buffer on both sides 
-    resonance_frequencies=model.predict_resonance_frequencies()
-    left_edge= resonance_frequencies[max] - buffer
-    width = resonance_frequencies[min]-left_edge + buffer
-    
-    return left_edge,width
-
-
-def pre_and_post_shift_comparison_subplots(model:sokm, shift_matrix_obj:ShiftMatrix, log=True, threshhold=1e-10,fs=5,perturbed_node=6, noise_object=None, edge_weight_visualization="color", node_colors=None):
-
-    """
-    Generate individual subplots comparing network response before and after applying eigenvalue shifts.
-
-    Creates four plots showing resonance response amplitudes and network topology with and without
-    the virtual transmission network (VTN). Returns paths to all generated plot files for composition.
-
-    Parameters
-    ----------
-    model : sokm
-        The network model containing the second order Kuramoto model Jacobian and system dynamics.
-    shift_matrix_obj : ShiftMatrix
-        ShiftMatrix instance containing eigenvalue shifts to be applied to the model.
-    log : bool, default=True
-        If True, use logarithmic scale for response amplitude y-axis.
-    threshhold : float, default=1e-10
-        Threshold for identifying non-zero entries in the shift matrix rows that indicate
-        nodes requiring active control in the network visualization; are understood as VTN nodes.
-    fs : int, default=5
-        Fontsize for axis labels and tick labels in all subplots.
-    perturbed_node : int, default=6
-        Index of the perturbed node for which the response is calculated.
-
-    Returns
-    -------
-    list[str]
-        List of paths to the saved plot files in order: [unshifted_resonance, shifted_resonance, 
-        unshifted_network, shifted_network].
-    """
-
-    
-    paths=[]
-    
-    # calculate perturbation band rectangle left and right x values 
-    pert_band = perturbation_band_location_from_shift(model, shift_matrix_obj)
-    
-    # construct omega array
-    omega=generate_frequency_range(model)
-
-    # calculate y min and max values 
-    response_vals_unshifted=model.calculate_response_amplitudes(omega)
-    response_vals_shifted=model.calculate_response_amplitudes(omega,S=shift_matrix_obj.shift_matrix)
-    all_response_vals=np.vstack((response_vals_shifted,response_vals_unshifted))
-    min_max=(np.min(all_response_vals)*1.1,1.1*np.max(all_response_vals))
-    #if noise_object is not None:
-        #min_max=(min(min_max[0], 0.001*np.max(noise_object.psd)), max(min_max[1], 1.1*np.max(noise_object.psd)))
-
-    # fetch unshifted resonance plot data & plot
-    print("Visualizing network without VTN...")
-    paths.append(resonance_plot(model, pert_band=pert_band, min_max=min_max, name="res.SVG", log=log, extra_scope=0.2, show_resonance_location=True, fs=fs,lw=1,alpha=1.,x_axis_off=True,perturbed_node=perturbed_node,noise_object=noise_object))
-    # generate shifted resonance data and plot
-    print("Visualizing network with VTN...")
-    paths.append(resonance_plot(model, shift_matrix_obj=shift_matrix_obj, pert_band=pert_band, min_max=min_max, name= "res_shifted.SVG",log=log, extra_scope=0.2, show_resonance_location=True, fs=fs,lw=1,alpha=1.,perturbed_node=perturbed_node,noise_object=noise_object))
-
-    # generate network plot WITH seed
-    print("Plotting unshifted response amplitudes...")
-    paths.append(plot_network( model, seed=4, name="network.SVG", edge_weight_key="weight", edge_weight_visualization=edge_weight_visualization, perturbed_node=perturbed_node, threshhold=threshhold, node_colors=node_colors))
-
-    # generate network plot with VTN connecting nodes corresponding to non zero rows of the shift matrix
-    print("Plotting shifted response amplitudes...")
-    paths.append(plot_network( model, shift_matrix_obj=shift_matrix_obj, seed=4, name="network_VTN.SVG", edge_weight_visualization=edge_weight_visualization,  perturbed_node=perturbed_node, threshhold=threshhold, node_colors=node_colors ))
-    
-    return paths
-
-
-def compose_pre_and_post_shift_comparison(model:sokm, shift_matrix_obj:ShiftMatrix, log=True, vtn_threshhold=1e-10, fontsize=5, perturbed_node=6, noise_object=None, name="comparison", edge_weight_visualization="color",node_colors=None):
-
-    """
-    Generate individual subplots comparing network response before and after applying eigenvalue shifts.
-
-    Composes the four plots showing resonance response amplitudes and network topology with and without
-    virtual tunable nodes (VTN) into one figure.
-
-    Parameters
-    ----------
-    model : sokm
-        The network model containing the second order Kuramoto model Jacobian and system dynamics.
-    shift_matrix_obj : ShiftMatrix
-        ShiftMatrix instance containing eigenvalue shifts to be applied to the model.
-    log : bool, default=True
-        If True, use logarithmic scale for response amplitude y-axis.
-    vtn_threshhold : float, default=1e-10
-        Threshold for identifying non-zero entries in the shift matrix rows that indicate
-        nodes requiring active control in the network visualization.
-    fs : int, default=5
-        Fontsize for axis labels and tick labels in all subplots.
-    perturbed_node : int, default=6
-        Index of the perturbed node for which the responses are calculated.
-    freqs_psds : tuple of array-like, optional
-        A tuple containing frequency values and corresponding power spectral density values to be plotted.
-
-    Returns
-    -------
-
-    """
-
-
-    print("Composing network visualizations and response amplitude plots...")
-    paths=pre_and_post_shift_comparison_subplots(model, shift_matrix_obj, log=log, threshhold=vtn_threshhold,fs=fontsize, perturbed_node=perturbed_node, noise_object=noise_object, edge_weight_visualization=edge_weight_visualization, node_colors=node_colors)
-
-    fig = sg.SVGFigure("7in", "2.2in")
-    #fig.append(sc.Grid(10,10)) # visual grid for ease of aligning figures
-
-    # vertically stacking response amplitude plots
-    x_0=110
-    y_0=45
-    for i in range(2):
-        fig_part = sg.fromfile(paths[i])
-        res_plot = fig_part.getroot()
-        res_plot.moveto(x_0, y_0*i, scale_x=1, scale_y=1)
-        reference=sg.TextElement(x_0+5,i*y_0+5, chr(ord('`')+i+2)+")", size=6)
-        fig.append([res_plot,reference])
-
-    # load and place the network plots to the left and right respectively
-    noise_offset=20 if noise_object is not None else 0 
-    for i in range(2,4):
-        fig_part = sg.fromfile(paths[i])
-        network_plot = fig_part.getroot()
-        network_plot.moveto((i-2)*(260+noise_offset), 0, scale_x=1, scale_y=1)
-        if i==2:
-            reference=sg.TextElement((i-2)*260+5,5, "a)", size=6)
-        else:               
-            reference=sg.TextElement((i-2)*(260+5+noise_offset),5, "d)", size=6)
-        fig.append([network_plot,reference])
-
-        
-    # saving as SVG and PNG
-    save_dir=os.path.join(shift_matrix_obj.current_dir,name+".svg")
-    fig.save(save_dir)
-    png_path=os.path.join(shift_matrix_obj.current_dir,name+".png")
-    svg2png(url=save_dir,write_to=png_path,
-            parent_height=110,parent_width=400,output_height=115*4,output_width=400*4)
-
-
-def generate_dynamics_comparison(t_final,
-                               model:sokm,
-                               shift_matrix_obj:ShiftMatrix,
-                               perturbation_strength=0.05,
-                               steps=8000,
-                               y_0=None,
-                               name="dynamics_comparison", 
-                               save_dir=None,
-                               fontsize=5,
-                               perturbed_node=6,
-                               noise_type="white",
-                               frequency_samples=400,
-                               nodes=[0,3,5]):
-    
-    
-    # making sure that input is valid
-    if noise_type not in ("exp_gaussian", "gaussian", "white", "realistic", "realistic+peak"):
-        raise ValueError("noise_type must be 'exp_gaussian' or 'gaussian' or 'white' or 'realistic' or 'realistic+peak'")
-
-    # Calculating the resonance frequencies affected by the shift prior to the shift
-    all_orig_freqs = model.predict_resonance_frequencies()
-    all_orig_freqs = all_orig_freqs[np.invert(np.isnan(all_orig_freqs))]
-    prior_shift_freqs=all_orig_freqs[shift_matrix_obj.eigenvalue_indices]
-
-    # checking if step size is sufficient to capture the non-local dynamics of the network
-    if np.max(all_orig_freqs)*10>steps/t_final:
-        print("WARNING: The chosen step size might be too large to capture the non-local dynamics of the network. Consider increasing the number of steps or decreasing t_final for a more accurate representation of the dynamics.")
-    print(f"Time scale of largest eigenvalue is {1/np.max(all_orig_freqs)} while the time step size is {t_final/steps}. Consider adjusting these parameters if the time step size is not significantly smaller than the time scale of the largest eigenvalue for a more accurate representation of the dynamics.")
-
-    #creating scenarios
-    scenarios=[]
-
-    # creating offset only scenario
-    #scenarios.append((r"initial offset", (None,5*perturbation_strength)))
-
-    # creating noise from psd scneario
-    left, width = perturbation_band_location_from_shift(model, shift_matrix_obj, buffer=0.05)
-    width = width/(2*np.pi) # 
-    left = left/(2*np.pi)
-    center = left+width/2
-
-    if noise_type=="exp_gaussian":
-        exp_gaussian_params = {'max_ampl': perturbation_strength, 'cutoff': np.max(all_orig_freqs)/(2*np.pi), 'center': center, 'width': width*0.3/2}
-        noise_object = dynamics.ContinuousSpectrumNoise(dynamics.exp_gaussian_spectrum, exp_gaussian_params, max_val=0.05, steps=frequency_samples, rate=1.)
-        noise_label=r"exp-gaussian"
-    elif noise_type=="gaussian":
-        gaussian_params = {'max_ampl': perturbation_strength, 'center': center, 'width': width*0.3/2}
-        noise_object = dynamics.ContinuousSpectrumNoise(dynamics.gaussian_spectrum, gaussian_params, max_val=0.05, steps=frequency_samples, rate=1.)
-        noise_label=r"gaussian"
-    elif noise_type=="white":
-        white_noise_params = {'max_ampl': perturbation_strength, 'freq_min': left, 'freq_max': left + width}
-        noise_object = dynamics.ContinuousSpectrumNoise(dynamics.white_spectrum, white_noise_params, max_val=0.05, steps=frequency_samples, rate=1.)
-        noise_label=r"white"
-    elif noise_type=="realistic":
-        realistic_params = {'cutoff': np.max(all_orig_freqs)/(2*np.pi), 'min': 0.05}
-        noise_object = dynamics.ContinuousSpectrumNoise(dynamics.realistic_spectrum, realistic_params, max_val=0.05, steps=frequency_samples, rate=1.)
-        noise_label=r"realistic"
-    elif noise_type=="realistic+peak":
-        realistic_peak_params = {'cutoff': np.max(all_orig_freqs)/(2*np.pi), 'min': 0.05, 'center': center, 'width': width*0.3/2}
-        noise_object = dynamics.ContinuousSpectrumNoise(dynamics.realistic_spectrum_with_peak, realistic_peak_params, max_val=0.05, steps=frequency_samples, rate=1.)
-        noise_label=r"realistic + peak"
-
-    path=noise_object.save(shift_matrix_obj.current_dir)
-    #print(path)
-    #noise_object=noise_object.from_file(path)
-    plot_noise(noise_object, shift_matrix_obj, name=noise_label, save_dir=None)
-    pert = (dynamics.perturbation_from_psd, (noise_object,perturbed_node))
-    scenarios.append((noise_label, pert))
-    
-    # creating color coding of nodes according to their distance to the perturbed node for the network plot
-    cmap=plt.cm.cividis.reversed()
-    node_colors = node_colors_from_perturbation_distance(perturbed_node, model, cmap=cmap)
-
-    # adding the power spectral densities to the response amplitude plot
-    compose_pre_and_post_shift_comparison(model, shift_matrix_obj, log=True, vtn_threshhold=1e-10, fontsize=fontsize, perturbed_node=perturbed_node, noise_object=noise_object, name=noise_type+"_comparison", node_colors=node_colors, edge_weight_visualization="color")
-
-    # creating resonance scenarios
-    
-    for i in np.invert(range(0, len(prior_shift_freqs))):
-        args_sine = (perturbation_strength, prior_shift_freqs[i] , perturbed_node)
-        scenarios.append(
-            (r"$\omega=$"+f"{np.round(prior_shift_freqs[i], 3)}", (dynamics.sine_perturbation_single_node, args_sine))
-        )
-
-    # forwarding the scenarios to the plot_utils function
-    if False:
-        return plot_scenario_comparison(t_final,
-                               model,
-                               shift_matrix_obj,
-                               scenarios,
-                               steps=steps,
-                               y_0=y_0,
-                               name= noise_type+"_"+name, 
-                               save_dir=save_dir,
-                               fontsize=fontsize+5,
-                               perturbed_node=perturbed_node)
-
-    plot_scenario_comparison_split(t_final,
-                               model,
-                               shift_matrix_obj,
-                               scenarios,
-                               nodes=nodes,
-                               steps=8000,
-                               y_0=y_0,
-                               name="dynamics_comparison", 
-                               save_dir=None,
-                               fontsize=5,
-                               perturbed_node=1)
-
-
-def plot_dynamics_evaluation(t_final,
-                            model:sokm,
-                                load_scenarios=False,
-                               perturbation_strength=0.05,
-                               steps=8000,
-                               name="dynamics_evaluation", 
-                               save_dir=None,
-                               y_0=None,
-                               fontsize=10,
-                               perturbed_node=6,
-                               noise_type="white",
-                               frequency_samples=400,
-                               nodes=[0,3],
-                               overwrite=False,
-                               alpha=1.):
-    """
-    Creates a publication ready plot comparing two different VTN setup fro the same BESS setup based on BESS powers (as a func of time and averaged), 
-    individual node trajectories, power spectral density of the response. The trajectories and PSD are inside the subplot compared to the response without VTN.
-    On top of the two resulting rows are a plot of the network and one of of the driving signal psd. Inside the psd Plots the vtn affected response frequencies
-    are annotated via vlines. 
-    """
-    
-    if y_0 is None:
-        y_0=np.zeros(model.ode_dimension)
-        y_0[:model.jacobian_matrix.shape[0]] = model.compute_fixed_point()
-
-    # generate scenarios:
-    scenarios=generate_scenarios(model, noise_type=noise_type, perturbation_strength=perturbation_strength, frequency_samples=frequency_samples,steps=steps,overwrite=overwrite) if not load_scenarios else load_scenarios
-
-    # create the axes for the figure
-    ONE_MM = 1 / 25.4  # Convert mm to inches
-    fig = plt.figure(figsize=(85*ONE_MM*2,70*ONE_MM))
-    w=6
-    h=2
-    
-    grid=(3*h,3*w)
-    ax_network=plt.subplot2grid(grid, (0,0), rowspan=h, colspan=2*w, fig=fig)
-    ax_psd=plt.subplot2grid(grid, (0,2*w), rowspan=h, colspan=w, fig=fig)
-    scenario_axes={}
-    for i in range(1,len(scenarios)+1):
-        axes = []
-        axes.append(plt.subplot2grid(grid, (h*i,0), rowspan=h, colspan=w, fig=fig))
-        axes.append(plt.subplot2grid(grid, (h*i,w), rowspan=int(h/2), colspan=w, fig=fig))
-        axes.append(plt.subplot2grid(grid, (h*i+1,w), rowspan=int(h/2), colspan=w, fig=fig))
-        axes.append(plt.subplot2grid(grid, (h*i,2*w), rowspan=h, colspan=w, fig=fig))
-        scenario_axes[f"ax_row{i}"]=axes
-
-    
-    # plot  network
-    shift_matrix_obj= scenarios[0][3][0]
-    plot_network( model, shift_matrix_obj=shift_matrix_obj, axes=ax_network, seed=4, name="network_VTN.SVG",  perturbed_node=perturbed_node, node_colors="black" )
-
-    # calculate vline location of resonances shifted w and w/o VTN
-
-    # plot perturbation psd histogram 
-    noise_object = scenarios[0][1][0] #fetching the noise object from the first scenario, which is the only one with noise in our current setup
-    freqs=noise_object.freqs/2*np.pi
-    noise_psd=noise_object.psd
-    filter=noise_psd>0
-    freqs=freqs[filter]
-    noise_psd=noise_psd[filter]
-    freqs_lims=(freqs[0], freqs[-1])
-    min_max_psd = plot_psd(ax_psd,freqs,noise_psd,freqs_vtn=None,psd_vtn=None,freqs_lims=freqs_lims)
-
-    # as a separate function: plot scenario row (generate data or not based on load_scenarios parameter)
-    for i,scenario in enumerate(scenarios):
-        psd_vlines, psd_vline_colors = v_line_locations_from_shift(model, scenario[3][0])
-        min_max_psd = plot_scenario_row(t_final, 
-                                        scenario, 
-                                        model, 
-                                        y_0, 
-                                        scenario_axes[f"ax_row{i+1}"], 
-                                        nodes=nodes, 
-                                        steps=steps, 
-                                        meta_scenario_name=f"scenario{i+1}",
-                                        overwrite=overwrite,
-                                        freqs_lims=freqs_lims, 
-                                        min_max_psd=min_max_psd,
-                                        psd_vlines= psd_vlines,
-                                        psd_vline_colors=psd_vline_colors,
-                                        alpha=alpha)
-    
-    min_max_psd[0] = max(min_max_psd[0],1e-8)
-    ax_psd.set_ylim(min_max_psd)
-    for i in range(1,len(scenarios)+1):
-        scenario_axes[f"ax_row{i}"][3].set_ylim(min_max_psd)
-    
-
-    if save_dir is None:
-        save_dir = model.current_dir
-    svg_path=save_figure(fig, save_dir=save_dir, name=name+"_tfinal"+str(t_final)+".svg")
-    png_path=os.path.join(save_dir,name+"_tfinal"+str(t_final)+".png")
-    svg2png(url=svg_path,write_to=png_path,
-                parent_height=110,parent_width=400,output_height=115*4,output_width=400*4)
-    return svg_path
-
-
-def generate_scenarios(model:sokm, noise_type="realistic", perturbation_strength=0.1, frequency_samples=400 , steps=8000, overwrite=True):
-    """
-    A helper function to generate the the scenarios for handling in plot dynamics evaluation and ultimately dynamics.integrate_f.
-    THe hardcoded scenarios are:
-        - 3 BESS in identical loactions
-        - one shift and two shifts
-        - identical driving of the system
-    """
-
-    # making sure that input is valid
-    if noise_type not in ("sine","exp_gaussian", "gaussian", "white", "realistic", "realistic+peak"):
-
-        raise ValueError("noise_type must be 'sine','exp_gaussian' or 'gaussian' or 'white' or 'realistic' or 'realistic+peak'")
-
-
-    # checking if step size is sufficient to capture the non-local dynamics of the network
-    all_orig_freqs = model.predict_resonance_frequencies()
-    all_orig_freqs = all_orig_freqs[np.invert(np.isnan(all_orig_freqs))]
-
-    if np.max(all_orig_freqs)*10>steps/t_final:
-        print("WARNING: The chosen step size might be too large to capture the non-local dynamics of the network. Consider increasing the number of steps or decreasing t_final for a more accurate representation of the dynamics.")
-    print(f"Time scale of largest eigenvalue is {1/np.max(all_orig_freqs)} while the time step size is {t_final/steps}. Consider adjusting these parameters if the time step size is not significantly smaller than the time scale of the largest eigenvalue for a more accurate representation of the dynamics.")
-
-
-    shift_matrix_obj_a = ShiftMatrix(model=model)
-    shift_matrix_obj_b = ShiftMatrix(model=model)
-
-    # setting vtn parameters and calculating rudimentary ideal vtn node locations for the given shifts and vtn size
-    #zero_rows = np.array([5,6,7],dtype=int)
-    num_vtn_nodes = 3
-    zero_cols = np.array([],dtype=int)
-    eigenvalue_indices_a = [ 2,3]
-    shifts_a = np.array([-0.6,0.3],dtype=float)
-    eigenvalue_indices_b = [ 5]
-    shifts_b = np.array([-0.5],dtype=float)
-    zero_rows = shift_matrix_obj_a.ideal_zero_rows(num_vtn_nodes, eigenvalue_indices_a+eigenvalue_indices_b) 
-
-    # generate shift matrices    
-    shift_matrix_obj_a.construct_from_scratch(eigenvalue_indices_a, shifts_a, zero_rows, zero_cols)
-    shift_args_a = (shift_matrix_obj_a, model, None)
-    shift_a = (dynamics.jacobian_shift, shift_args_a)
-    compose_shift_matrix_construction_visualization(shift_matrix_obj_a, log=True, absolute=True,fs=10, jac_color=darkblue,overwrite=overwrite)
-
-    
-    shift_matrix_obj_b.construct_from_scratch(eigenvalue_indices_b, shifts_b, zero_rows, zero_cols)
-    shift_args_b = (shift_matrix_obj_b, model, None)
-    shift_b = (dynamics.jacobian_shift, shift_args_b)
-    compose_shift_matrix_construction_visualization(shift_matrix_obj_b, log=True, absolute=True,fs=10, jac_color=darkblue,overwrite=overwrite)
-    
-    #all_orig_freqs = all_orig_freqs[np.invert(np.isnan(all_orig_freqs))]
-    #prior_shift_freqs=all_orig_freqs[shift_matrix_obj.eigenvalue_indices]
-
-    
-    # generate noise configuration NOTE: currently only "realistic is functional!"
-    if noise_type=="exp_gaussian":
-        exp_gaussian_params = {'max_ampl': perturbation_strength, 'cutoff': np.max(all_orig_freqs)/(2*np.pi), 'center': center, 'width': width*0.3/2}
-        noise_object = dynamics.ContinuousSpectrumNoise(dynamics.exp_gaussian_spectrum, exp_gaussian_params, max_val=0.05, steps=frequency_samples, rate=1.)
-        noise_label=r"exp-gaussian"
-    elif noise_type=="gaussian":
-        gaussian_params = {'max_ampl': perturbation_strength, 'center': center, 'width': width*0.3/2}
-        noise_object = dynamics.ContinuousSpectrumNoise(dynamics.gaussian_spectrum, gaussian_params, max_val=0.05, steps=frequency_samples, rate=1.)
-        noise_label=r"gaussian"
-    elif noise_type=="white":
-        white_noise_params = {'max_ampl': perturbation_strength, 'freq_min': left, 'freq_max': left + width}
-        noise_object = dynamics.ContinuousSpectrumNoise(dynamics.white_spectrum, white_noise_params, max_val=0.05, steps=frequency_samples, rate=1.)
-        noise_label=r"white"
-    elif noise_type=="realistic":
-        realistic_params = {'cutoff': np.max(all_orig_freqs)/(2*np.pi), 'min': 0.05}
-        noise_object = dynamics.ContinuousSpectrumNoise(dynamics.realistic_spectrum, realistic_params, max_val=0.05, steps=frequency_samples, rate=1.)
-    elif noise_type=="realistic+peak":
-        realistic_peak_params = {'cutoff': np.max(all_orig_freqs)/(2*np.pi), 'min': 0.05, 'center': center, 'width': width*0.3/2}
-        noise_object = dynamics.ContinuousSpectrumNoise(dynamics.realistic_spectrum_with_peak, realistic_peak_params, max_val=0.05, steps=frequency_samples, rate=1.)
-        noise_label=r"realistic + peak"
-    elif noise_type=="sine":
-
-        pert=(dynamics.sine_perturbation_single_node, (amplitude, frequency, perturbed_node))
-
-    noise_object.save(model.current_dir)
-    print(f"Saved noise object with {noise_type} spectrum to {model.current_dir}")
-    pert = (dynamics.perturbation_from_psd, (noise_object,perturbed_node))
-    
-    # compose into scenarios 
-    return [pert+shift_a,pert+shift_b]
-
-def generate_sine_scenarios(model:sokm, amplitude=0.1, overwrite=True):
-    """
-    A helper function to generate the the scenarios for handling in plot dynamics evaluation and ultimately dynamics.integrate_f.
-    THe hardcoded scenarios are:
-        - 3 BESS in identical loactions
-        - one shift and two shifts
-        - identical driving of the system
-    """
-
-    all_orig_freqs = model.predict_resonance_frequencies()
-    all_orig_freqs = all_orig_freqs[np.invert(np.isnan(all_orig_freqs))]
-
-    shift_matrix_obj_a = ShiftMatrix(model=model)
-    shift_matrix_obj_b = ShiftMatrix(model=model)
-
-    # setting vtn parameters and calculating rudimentary ideal vtn node locations for the given shifts and vtn size
-    #zero_rows = np.array([5,6,7],dtype=int)
-    num_vtn_nodes = 2
-    zero_cols = np.array([],dtype=int)
-    eigenvalue_indices_a = [4]
-    shifts_a = np.array([-0.6],dtype=float)
-    eigenvalue_indices_b = [ 6]
-    shifts_b = np.array([-0.5],dtype=float)
-    zero_rows = shift_matrix_obj_a.ideal_zero_rows(num_vtn_nodes, eigenvalue_indices_a+eigenvalue_indices_b) 
-    # generate shift matrices    
-    shift_matrix_obj_a.construct_from_scratch(eigenvalue_indices_a, shifts_a, zero_rows, zero_cols)
-    shift_args_a = (shift_matrix_obj_a, model, None)
-    shift_a = (dynamics.jacobian_shift, shift_args_a)
-    compose_shift_matrix_construction_visualization(shift_matrix_obj_a, log=True, absolute=True,fs=10, jac_color=darkblue,overwrite=overwrite)
-
-    
-    shift_matrix_obj_b.construct_from_scratch(eigenvalue_indices_b, shifts_b, zero_rows, zero_cols)
-    shift_args_b = (shift_matrix_obj_b, model, None)
-    shift_b = (dynamics.jacobian_shift, shift_args_b)
-    compose_shift_matrix_construction_visualization(shift_matrix_obj_b, log=True, absolute=True,fs=10, jac_color=darkblue,overwrite=overwrite)
-    
-    #all_orig_freqs = all_orig_freqs[np.invert(np.isnan(all_orig_freqs))]
-    #prior_shift_freqs=all_orig_freqs[shift_matrix_obj.eigenvalue_indices]
-
-    
-    pert_a = (dynamics.sine_perturbation_single_node, (amplitude,all_orig_freqs[eigenvalue_indices_a[0]],perturbed_node))
-    
-    pert_b = (dynamics.sine_perturbation_single_node, (amplitude,all_orig_freqs[eigenvalue_indices_b[0]],perturbed_node))
-    
-    # compose into scenarios 
-    return [pert_a+shift_a,pert_b+shift_b]
-
-def v_line_locations_from_shift(model:sokm, shift_matrix_obj:ShiftMatrix):
-    """
-    Calculates the frequencies of shifting eigenvalues prior and post shift for annotation in psd_plots.
-    Theoretical post shift frequencies are verified with the existence of an actual resonance frequency in 1e-8 proximity to the predicted shifted resonance frequency. 
-
-    Parameters
-    ----------
-    model : sokm
-        The network model containing the second order Kuramoto model Jacobian and system dynamics.
-    shift_matrix_obj : ShiftMatrix
-        ShiftMatrix instance containing eigenvalue shifts applied to the model.
-
-    Returns
-    -------
-    tuple of arrays
-        Tuple containing three arrays: (frequencies_prior, frequencies_post_theo, frequencies_post_actual), 
-        - frequencies_prior are the resonance frequencies corresponding to the eigenvalues that are shifted, 
-        - frequencies_post_theo are the predicted resonance frequencies after applying the shift based on the shift matrix
-        - frequencies_post_actual are the actual resonance frequencies of the model after applying the shift
-    """
-
-    frequencies_prior= model.predict_resonance_frequencies(indices=shift_matrix_obj.eigenvalue_indices)
-
-    frequencies_post_actual=model.predict_resonance_frequencies(S=shift_matrix_obj.shift_matrix, indices=shift_matrix_obj.eigenvalue_indices) 
-
-    shifted_eigvals=shift_matrix_obj.eigenvalues[shift_matrix_obj.eigenvalue_indices]+shift_matrix_obj.shifts
-    frequencies_post_theo=model.predict_resonance_frequencies(shifted_eigvals=shifted_eigvals)
-    rel_diffs = np.abs(frequencies_post_theo - frequencies_post_actual) / np.abs(frequencies_post_actual)
-
-    print("Maximum relative difference between predicted post shift frequencies and actual post shift frequencies: ", np.max(rel_diffs)*100, " %.")
-    pre_color=np.empty_like(frequencies_prior, dtype=object)
-    pre_color.fill("black")
-    post_color=np.empty_like(frequencies_post_theo, dtype=object)
-    post_color.fill(darkblue)
-
-
-    return np.concatenate([frequencies_prior, frequencies_post_theo]), np.concatenate([pre_color, post_color])
-
-
 def break_axes(axes, size=6):
     axes[0].spines.right.set_visible(False)
     axes[1].spines.left.set_visible(False)
@@ -1074,7 +344,9 @@ def network_w_response(scenario,
                        color=None,
                        labels=False,
                        panel="a",
-                       fontsize=10):
+                       fontsize=10,
+                    euler_maruyama=False,
+                    onset_steady=500):
     shift_matrix_obj = scenario[3][0] if vtn_on else None
     pert_amplitude, pert_freq, pert_node, onset_t= scenario[1]
 
@@ -1087,13 +359,14 @@ def network_w_response(scenario,
         save = True
         fig, axes = plt.subplots(1, 2, figsize=(2.8, 0.6), gridspec_kw={"width_ratios": [3, 3]})
     
-    if color.ndim>1:
+    if type(color) == tuple and len(color) > 1:
         scenario_color=blend_colors(color,mode="plt")
     else:
         scenario_color=color
 
     # calculate trajectories
-    traj=generate_or_fetch_scenario_data(t_final, scenario, model, y_0=y_0, steps=steps, meta_scenario_name=scenario_name, save_dir=save_dir, overwrite=overwrite, minus_fixpoint= True,silent=True)
+    traj=generate_or_fetch_scenario_data(t_final, scenario, model, y_0=y_0, steps=steps, meta_scenario_name=scenario_name, save_dir=save_dir, overwrite=overwrite, minus_fixpoint= True,silent=True,
+            euler_maruyama=euler_maruyama)
     t=traj["t"]
     if vtn_on:
         vals=traj["ys_shifted"][:np.shape(model.jacobian_matrix)[0],:] #fetching only the node trajectories, not the velocity trajectories
@@ -1104,7 +377,7 @@ def network_w_response(scenario,
         vals=dynamics.sine_perturbation_single_node(t,vals[:,0],scenario[1])
         node = pert_node # setting node i.e. the of vals which we plot to the index of perturbed node
     # calculate steady state response psd for each node
-    t_traj_index=np.abs(t - t_final + t_window_steady).argmin() 
+    t_traj_index=np.abs(t - onset_steady).argmin() 
     freqs, psd = compute_psd_from_traj(t[t_traj_index:], vals[:,t_traj_index:]) 
     freqs =2*np.pi*freqs # converting to omega
 
@@ -1132,8 +405,9 @@ def network_w_response(scenario,
             node_colors = plt.cm.coolwarm(response_amplitude)
 
         if plot_real_psd:
-            for i in range(np.shape(psd)[0]):
-                axes[1+transient].plot(freqs,psd[i,:],linewidth=linewidth,color=node_colors[i])
+            #for i in range(np.shape(psd)[0]):
+            #    axes[1+transient].plot(freqs,psd[i,:],linewidth=linewidth,color=node_colors[i])
+            axes[1+transient].plot(freqs,psd[node,:],linewidth=linewidth,color=node_colors[node])
 
         # plot network with node color coding according to response psd
         plot_network(
@@ -1190,7 +464,8 @@ def network_w_response(scenario,
             axes[1+transient].vlines(pert_freq,0,pert_amplitude, color="black", linewidth=linewidth,alpha=1)
         else:
             for i, freq in enumerate(pert_freq):
-                axes[1+transient].vlines(freq,0,pert_amplitude, color="black", linewidth=linewidth,alpha=1)
+                axes[1+transient].vlines(freq,0,pert_amplitude if type(pert_amplitude) is float else pert_amplitude[i], color="black", linewidth=linewidth,alpha=1)
+        
     else:
         S = None
         if vtn_on:
@@ -1200,18 +475,18 @@ def network_w_response(scenario,
                 S=shift_matrix_obj
         response_vals=model.calculate_response_amplitudes(omega,S=S,k=pert_node)
         axes[1+transient].plot(omega, response_vals[node], color="black",linewidth=linewidth)
-        axes[1+transient].set_ylim((np.min(response_vals[node]),10*np.max(response_vals[node])))
+        axes[1+transient].set_ylim((np.min(response_vals[node]) if np.min(response_vals[node]) > 1e-4 else 1e-4, 10*np.max(response_vals[node])))
     axes[1+transient].set_xlim(min(omega),max(omega))    
     axes[1+transient].set_yscale("log")
     #axes[1+transient].yaxis.tick_right()
     if not only_perturbation:
-        axes[1+transient].set_ylim(1e-2,np.max(response_vals)*2)
+        axes[1+transient].set_ylim(0.5*np.min(response_vals),np.max(response_vals)*2) #<- this is weird, probably redundant
         #axes[1+transient].set_yticks([round_log(np.min(response_vals[node])),round_log(np.max(response_vals[node])*2)])
         #axes[1+transient].set_yticks([1e-2,1e2])
     else:
-        axes[1+transient].set_ylim(1e-2,pert_amplitude*2)
-        axes[1+transient].set_yticks([1e-2,pert_amplitude*10])
-    if plot_real_psd:
+        axes[1+transient].set_ylim(1e-10,np.max(pert_amplitude)*2)
+        axes[1+transient].set_yticks([1e-10,np.max(pert_amplitude)*10])
+    if plot_real_psd and not only_perturbation:
         axes[1+transient].set_ylim((1e-10,10*np.max(response_vals[node])))
     
     # addid perturbation prequency patches
@@ -1221,15 +496,16 @@ def network_w_response(scenario,
         axes[1+transient].add_patch(rect)
     else:
         for i, freq in enumerate(pert_freq):
-            rect=plt.Rectangle((freq-delta,0), 2*delta, 1e3, color=color[i],alpha=0.3,edgecolor=[0,0,0,0],linewidth=linewidth)
-            axes[1+transient].add_patch(rect)
+            if len(pert_freq)<=len(color):
+                rect=plt.Rectangle((freq-delta,0), 2*delta, 1e3, color=color[i],alpha=0.3,edgecolor=[0,0,0,0],linewidth=linewidth)
+                axes[1+transient].add_patch(rect)
 
     if only_perturbation:
         if np.isscalar(pert_freq):
             axes[1].vlines(pert_freq,0,pert_amplitude, color="black", linewidth=linewidth,alpha=1)
         else:
             for i, freq in enumerate(pert_freq):
-                axes[1].vlines(freq,0,pert_amplitude, color="black", linewidth=linewidth,alpha=1)
+                axes[1].vlines(freq,0,pert_amplitude if type(pert_amplitude) is float else pert_amplitude[i], color="black", linewidth=linewidth,alpha=1)
 
     label_offset=0
     if only_perturbation is False and vtn_on is False:
@@ -1264,6 +540,8 @@ def network_w_response(scenario,
             specific_name=scenario_name+"_perturbation"
         else:
             specific_name=scenario_name+"_vtn" if vtn_on else scenario_name+"_no_vtn"
+        if euler_maruyama:
+            specific_name+="_euler_maruyama"
         svg_path=save_figure(fig, save_dir=save_dir, name=specific_name+".svg")
         png_path=os.path.join(save_dir,specific_name+".png")
         svg2png(url=svg_path,write_to=png_path,
@@ -1275,8 +553,6 @@ def network_w_response(scenario,
     else:
         return response_max
 
-
-    
 
 def vtn_scenario_powers(t_final,t_window,scenario,model,axes,absolute=False, save_dir=None, threshhold=1e-10,epsilon=None,specific_name="shift",fontsize=10, linewidth=1., panel="a" ):
     """
@@ -1464,19 +740,21 @@ def scenario_panel_recursive(model,
                              cmap="coolwarm",
                              linewidth=1.,
                              transient=True, 
-                             onset_t = 1.
+                             onset_t = 1.,
+                             euler_maruyama=False
                              ):
     
     # allows for calling with a specific scenario, but also just with a shift matrix object
+    print("scenario:", scenario)
     if isinstance(scenario, ShiftMatrix): #if no scenario, but only the shiftMatrix object (class) is provided the object construction is visualized  the individual scnearios generated
         shift_matrix_obj=scenario
-        compose_shift_matrix_construction_visualization_vertical(shift_matrix_obj, log=True, absolute=True,fs=10, jac_color=darkblue,overwrite=overwrite)
+        compose_shift_matrix_construction_visualization_horizontal(shift_matrix_obj, log=True, absolute=True,fs=10, jac_color=darkblue,overwrite=overwrite)
         scenario_provided=False
         check_individual_shifts=True
     else:
         shift_matrix_obj=scenario[3][0]
         if isinstance(shift_matrix_obj, ShiftMatrix):
-            compose_shift_matrix_construction_visualization_vertical(shift_matrix_obj, log=True, absolute=True,fs=10, jac_color=darkblue,overwrite=overwrite)
+            compose_shift_matrix_construction_visualization_horizontal(shift_matrix_obj, log=True, absolute=True,fs=10, jac_color=darkblue,overwrite=overwrite)
             check_individual_shifts=True
         else: # case of scenario with np.array shift matrix instead of ShiftMatrix object (class), sorry for poor naming of stuff
             check_individual_shifts = False
@@ -1677,15 +955,30 @@ def scenario_panel_recursive(model,
         #vtn_scenario_powers(t_final,scenario,model,absolute=False,save_dir=save_dir,epsilon=amplitude,specific_name=power_plot_name,fontsize=fontsize)
 
 
-def probe_network(model, shift_matrix_obj=None, pert_node=1,pert_amplitude=0.1, num=100,t_final=800, steps=16000, node=5, save_dir=None, name="large_network", overwrite=True ):
+def probe_network(model, 
+                  shift_matrix_obj=None, 
+                  pert_node=1,
+                  pert_amplitude=0.1, 
+                  num=100,t_final=800, 
+                  steps=16000, node=5, 
+                  save_dir=None, 
+                  name="large_network", 
+                  overwrite=True ,
+            onset_t=0,
+            onset_steady=500,
+            t_window=30, 
+            plot_real_psd=True,
+            linewidth=1.,
+            euler_maruyama=False):
     """
-    Creates a plot of the network and two additional panels inderneath side by side with the following content: 
+    Creates a plot of the network and two additional panels underneath side by side with the following content: 
     steady state response to white continuous noise and psd of the steady state response and theoretical psd on top 
     """
     # create subfigure grid
     fig = plt.figure(figsize=(3, 2), layout='constrained')
     axs = fig.subplot_mosaic([["network", "network"],
-                          ["trajectory", "psd"]])
+                          ["trajectory_pert", "psd_pert"],
+                          ["trajectory", "psd"]],)
     
     # create network plot
     plot_network(
@@ -1705,13 +998,17 @@ def probe_network(model, shift_matrix_obj=None, pert_node=1,pert_amplitude=0.1, 
         )
     
     vtn_on=True if shift_matrix_obj!=None else False
-    
+    print("vtn_on:", vtn_on)
     # create the scenario
     print("Creating scenario.")
     all_orig_freqs = model.predict_resonance_frequencies()
     all_orig_freqs = all_orig_freqs[np.invert(np.isnan(all_orig_freqs))]
     pert_freqs=np.linspace(np.min(all_orig_freqs),np.max(all_orig_freqs),num=num)
-    pert = (dynamics.sine_perturbation_single_node, (pert_amplitude,pert_freqs,pert_node))
+    #pert_freqs=np.linspace(np.max(all_orig_freqs)+1,np.max(all_orig_freqs)+3,num=num)
+    #pert_freqs=np.array([1,2,3,4,5.,6.,7,8,9,10,])
+    #amplitudes=pert_amplitude*pert_freqs**(-5/3)
+    amplitudes=np.ones_like(pert_freqs)*pert_amplitude/len(pert_freqs)
+    pert = (dynamics.sine_perturbation_single_node, (amplitudes,pert_freqs,pert_node,onset_t))
 
     if vtn_on:
         shift_args = (shift_matrix_obj, model, None)
@@ -1720,42 +1017,99 @@ def probe_network(model, shift_matrix_obj=None, pert_node=1,pert_amplitude=0.1, 
         shift=(None,None)    
     scenario=pert+shift
 
-    # fetch trajectory and plot
-    print("The simulation bit.")
-    traj=generate_or_fetch_scenario_data(t_final, scenario, model, steps=steps, meta_scenario_name="default", overwrite=overwrite, minus_fixpoint=False,silent=False)
-    t=traj["t"]
-    if vtn_on:
-        vals=traj["ys_shifted"][:np.shape(model.jacobian_matrix)[0],:] #fetching only the node trajectories, not the velocity trajectories
-    else:
-        vals=traj["ys"][:np.shape(model.jacobian_matrix)[0],:]
-
-    #axs["trajectory"].plot(t[-500:],vals[node,-500:])
-    pert_vals=np.zeros((np.shape(model.jacobian_matrix)[0],steps+1))
-    pert_vals=dynamics.sine_perturbation_single_node(t,pert_vals[:,0],scenario[1])
-    print("plotting trajectory")
-    axs["trajectory"].plot(t[:300],vals[pert_node,:300])
-    axs["trajectory"].plot(t[:300],pert_vals[pert_node,:300],color="red",linewidth=1.)
     
-    # calculate and plot psd
-    t=t[10000:]
-    node_vals=vals[pert_node,10000:]
-    
-    print("plotting and calculating psd")
-    freqs, psd = scipy.signal.welch(node_vals, fs=1/(t[1]-t[0]), axis=0, nperseg=len(t))
-    axs["psd"].plot(freqs,psd)
-    axs["psd"].set_yscale("log")
-    axs["psd"].set_ylim(pert_amplitude/num*1e-2,1.5*np.max(psd))
 
-    # calculate theoretical response amplitudes and plot it on top as a thin black line 
-    response_vals=model.calculate_response_amplitudes(freqs,k=pert_node)
-    axs["psd"].plot(freqs,response_vals[node,:],color="black",linewidth=1.)
-    plt.show()
+    network_w_response(scenario, 
+                            model, 
+                            t_final, 
+                            axes=[axs["trajectory_pert"],axs["psd_pert"]],  
+                            color=np.array(red),
+                            only_perturbation=True, 
+                            y_0=None, 
+                            steps=steps, 
+                            scenario_name=name, 
+                            overwrite=overwrite, 
+                            vtn_on=False, 
+                            node=node, 
+                            t_window=t_window,
+                            plot_real_psd=plot_real_psd,
+                            labels=False,
+                            save_dir=save_dir,
+                            panel="b",
+                            cmap="coolwarm",
+                            linewidth=linewidth,
+            euler_maruyama=euler_maruyama,
+            onset_steady=onset_steady)
+    
+    network_w_response(scenario, 
+                                model, 
+                                t_final, 
+                                axes=[axs["trajectory"],axs["psd"]],   
+                                color="black",
+                                y_0=None, 
+                                steps=steps, 
+                                scenario_name=name, 
+                                overwrite=False, 
+                                vtn_on=False, 
+                                node=node, 
+                                t_window=t_window,
+                                min_max=None,
+                                plot_real_psd=plot_real_psd,
+                                labels=False,
+                        save_dir=save_dir,
+                        panel="c",
+                        cmap="coolwarm",
+                        linewidth=linewidth,
+            euler_maruyama=euler_maruyama,
+            onset_steady=onset_steady)
+
+    if False:
+        # fetch trajectory and plot
+        print("The simulation bit.")
+        traj=generate_or_fetch_scenario_data(t_final, scenario, model, steps=steps, meta_scenario_name=name, overwrite=overwrite, minus_fixpoint=True, silent=False)
+        t=traj["t"]
+        if vtn_on:
+            vals=traj["ys_shifted"][:np.shape(model.jacobian_matrix)[0],:] #fetching only the node trajectories, not the velocity trajectories
+        else:
+            vals=traj["ys"][:np.shape(model.jacobian_matrix)[0],:]
+
+        #axs["trajectory"].plot(t[-500:],vals[node,-500:])
+        pert_vals=np.zeros((np.shape(model.jacobian_matrix)[0],steps+1))
+        pert_vals=dynamics.sine_perturbation_single_node(t,pert_vals[:,0],scenario[1])
+        print("plotting trajectory")
+
+        t_index= np.abs(t - t_window).argmin()
+        #axs["trajectory"].plot(t[:t_index],vals[pert_node,:t_index],alpha=0.7)
+        axs["trajectory"].plot(t[:t_index],pert_vals[pert_node,:t_index],color="red",linewidth=1.,alpha=0.7)
+        
+        # calculate and plot psd
+        print(len(t), len(vals[pert_node]))
+        t=t[20000:]
+        node_vals=vals[pert_node,20000:]
+        print(len(t), len(node_vals))
+        
+        print("plotting and calculating psd")
+        freqs, psd = scipy.signal.welch(node_vals, fs=1/(t[1]-t[0]), axis=0, nperseg=len(t))
+        axs["psd"].plot(2*np.pi*freqs,1/pert_amplitude*psd)
+        axs["psd"].set_yscale("log")
+        #axs["psd"].set_ylim(pert_amplitude/num*1e-2,1.5*np.max(psd))
+        axs["psd"].set_ylim(1e-5,5*np.max(psd)/pert_amplitude)
+        axs["psd"].set_xlim(0,10)
+
+        # calculate theoretical response amplitudes and plot it on top as a thin black line 
+        response_vals=model.calculate_response_amplitudes(freqs,k=pert_node)
+        for i in range(np.shape(model.jacobian_matrix)[0]):
+            axs["psd"].plot(freqs,response_vals[i,:],color="black" if i==node else "green",linewidth=1., alpha=0.1 if i!=node else 1.)
+    #plt.show()
 
     # save the figure
     if save_dir== None and shift_matrix_obj==None:
         save_dir= model.current_dir
     elif save_dir== None:
             save_dir = shift_matrix_obj.current_dir
+    name+="_num_of_modes_"+str(num)
+    if euler_maruyama:
+        name+="_euler_maruyama"
     svg_path=save_figure(fig, save_dir=save_dir, name=name+".svg")
     png_path=os.path.join(save_dir,name+".png")
     svg2png(url=svg_path,write_to=png_path,
@@ -1776,32 +1130,32 @@ if __name__ == "__main__":
     #model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\Instance_2026-06-11_12-56-31")
     #model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\8node")
     #model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\Moritz_vals")
-    #model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\Example network")
-    model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\moritz_a_001")
+    model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\Example network")
+    #model=sokm.load_from_folder("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\moritz_a_001")
     #model.compute_jacobian()
     
 
     # Generate a shift matrix
     shift_matrix_obj = ShiftMatrix(model=model)
+
     eigenvalue_indices = [ 2,5]
     shifts = np.array([-2.5,-1.5],dtype=float)
     #shifts = np.array([-2.5,-2.5],dtype=float)
     #zero_rows = np.array([5,6,7],dtype=int)
     #zero_rows=np.arange(5, dtype=int)
-    zero_rows=np.array([1,2,3,4,5])
+    #zero_rows=np.array([1,2,3,4,5])
+    #zero_rows=np.arange(np.shape(model.jacobian_matrix)[0]-len(eigenvalue_indices)-73, dtype=int)
+    zero_rows=shift_matrix_obj.ideal_zero_rows( num_vtn_nodes=3, eigenvalue_indices=eigenvalue_indices)
     zero_cols = np.array([],dtype=int)
     shift_matrix_obj.construct_from_scratch(eigenvalue_indices, shifts, zero_rows, zero_cols)
     #shift_matrix_obj= ShiftMatrix.load_from_file("C:\\Users\\leand\\Documents\\Ausprobieren\\TU Dresden WHK\\code\\data\\SecondOrderKuramotoModel\\Instance_2026-03-31_10-32-17\\shift_matrix.json")
-    #resonance_plot(model,log=True, show_resonance_location=True)
-    #pre_and_post_shift_comparison_subplots(model, shift_matrix_obj)
-    
     
     print(f"Xs: {shift_matrix_obj.Xs} and Ys: {shift_matrix_obj.Ys}")
 
     #compose_shift_matrix_construction_visualization(shift_matrix_obj, log=True, absolute=True,fs=8, jac_color=black)
     perturbed_node=5
-    t_final=750
-    steps=30000
+    t_final=1000
+    steps=16000
     meta_scenario_name="sine_scenario"
     #angle_comparison(model, shift_matrix_obj)
     nodes=[0,3]
@@ -1820,45 +1174,45 @@ if __name__ == "__main__":
                                     noise_type="realistic",
                                     overwrite=False
                                     )
+        
+    probe_network(model, overwrite=True, pert_amplitude=0.1, num =100, steps=steps*20, t_final= t_final, euler_maruyama=True, name="white_noise",onset_steady=750)
+
     if False:
-        print(np.sum(model.power_vector))
-        probe_network(model, overwrite=True, pert_amplitude=0.01, num =100)
-
-
-    plot_network(
-            model,
-            seed=42,
-            name="network", 
-            fs=10,
-            threshhold=1e-10,
-            node_colors=[0.,0.,0.,0.],
-            perturbed_node=None,
-            node_size=50,
-            labels=False,
-            show_node_type=True
-        )
-    #scenarios = generate_scenarios(model, noise_type="sine", perturbation_strength=0.1, frequency_samples=400 , steps=steps, overwrite=True)
-    #illustrative(model, amplitude=0.1, overwrite=False, node=4, plot_real_psd=False, labels=False)
-    scenario_panel_recursive(model,
-                             shift_matrix_obj,
-                             t_final,
-                             steps=steps,
-                             color=orange, 
-                             save_dir=None, 
-                             specific_name="scenario_panel", 
-                             overwrite=False,
-                             node=4, 
-                             t_window=10,
-                             pert_node=perturbed_node,
-                             labels=True,
-                             fontsize=10,
-                             plot_real_psd=False,
-                             onset_t=2
-                             )
-    # noise or driving, what is the difference?
-    # ways forward: 
-    # write integrator yourself ( but if I mess it up, that will be very shitty)
-    # move to Julia
-    # normal Ode integration (but then adding noise AFTER integration)
-    # continuous perturbation (not using fft but summing over sines with frequencies and random phases)
-    
+        plot_network(
+                    model,
+                    seed=42,
+                    name="network", 
+                    fs=10,
+                    threshhold=1e-10,
+                    node_colors=[0.,0.,0.,0.],
+                    perturbed_node=None,
+                    node_size=50,
+                    labels=False,
+                    show_node_type=True
+                )
+            #scenarios = generate_scenarios(model, noise_type="sine", perturbation_strength=0.1, frequency_samples=400 , steps=steps, overwrite=True)
+            #illustrative(model, amplitude=0.1, overwrite=False, node=4, plot_real_psd=False, labels=False)
+        print(type(shift_matrix_obj))
+        scenario_panel_recursive(model,
+                                    shift_matrix_obj,
+                                    t_final,
+                                    steps=steps,
+                                    color=orange, 
+                                    save_dir=None, 
+                                    specific_name="scenario_panel", 
+                                    overwrite=False,
+                                    node=4, 
+                                    t_window=10,
+                                    pert_node=perturbed_node,
+                                    labels=False,
+                                    fontsize=10,
+                                    plot_real_psd=False,
+                                    onset_t=2
+                                    )
+        # noise or driving, what is the difference?
+        # ways forward: 
+        # write integrator yourself ( but if I mess it up, that will be very shitty)
+        # move to Julia
+        # normal Ode integration (but then adding noise AFTER integration)
+        # continuous perturbation (not using fft but summing over sines with frequencies and random phases)
+        

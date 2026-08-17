@@ -27,6 +27,7 @@ import svgutils.compose as sc
 from cairosvg import svg2png
 import dynamics
 import scipy
+import Euler_Maruyama as em
 
 
 
@@ -39,7 +40,8 @@ orange = np.array([255, 153, 85, 100])/256
 green = np.array([44, 160, 90, 100])/256
 black = np.array([0, 0, 0, 100])/256
 
-
+#-----------
+# general functions for plotting and saving figures
 
 def create_cmap_from_white(color, cmap_length=256):
     """
@@ -197,6 +199,10 @@ def save_figure(fig, save_dir: str, name: str) -> str:
         fig.savefig(save_path,bbox_inches='tight',format="svg", dpi=300, transparent=True)
         
         return save_path
+
+
+#-----------
+# for shift matrix construction visualization
 
 
 def add_pcolormesh(ax, matrix, color=blue, min_max=None, log=True, cutoff=1e-5, absolute=False, cmap=None):
@@ -553,7 +559,6 @@ def shift_matrix_construction_visualization_subplots(shift_matrix_obj:ShiftMatri
     return saving_paths
 
 
-
 def compose_shift_matrix_construction_visualization_horizontal(shift_matrix_obj:ShiftMatrix, log=True, absolute=True,fs=8, jac_color=darkblue, overwrite=False, type="thumbnail",flipped=False, equation_mode= True, show_permutation=True):
     """
     Compose a comprehensive visualization of the shift matrix construction process.
@@ -807,520 +812,8 @@ def compose_shift_matrix_construction_visualization_vertical(shift_matrix_obj:Sh
             parent_height=140*len(file_paths_eigenspace)-20,parent_width=280,output_height=140*len(file_paths_eigenspace)-20,output_width=280)
     return save_dir
 
-def plot_dynamics(t_final,
-                    y_0,
-                    args,
-                    axes=None,
-                    t_0=0.,
-                    steps=8000,
-                    name: Optional[str]=None,
-                    save_dir: Optional[str]=None,
-                    node_colors=None):
-    """
-    Function to plot the numerically integrated state vector y at time t, given the model and perturbation.
-
-    Parameters:
-    -------
-    t_final: float
-        Time until which to integrate.
-    y_0: array-like
-        Initial value.
-    args: tuple
-        Tuple of the shape (model_ode, model_args, perturbation, perturbation_args, shift, shift_args) where:
-        - model_ode: function
-            The model specific function that computes the time derivative of the state vector based on the model.
-        - model_args: tuple
-            Arguments for the model specific function.
-        - perturbation: function or None
-            The perturbation function that computes the effect of the perturbation on the state vector.
-            If set to None no perturbation is added.
-        - perturbation_args: tuple or None
-            Arguments for the perturbation function.
-        - shift: function or None
-            The shift function that computes the effect of the shift on the state vector.
-            If set to None no shift is added.
-        - shift_args: tuple or None
-            Arguments for the shift function.
-    axes: matplotlib.axes._axes.Axes, optional
-        Axis to draw the dynamics on. If None, a new figure is created.
-    name: str, optional
-        File name when saving the plot if axes is not provided.
-    save_dir: str, optional
-        Directory to save the figure when axes is not provided.
-
-    Returns:
-    -------
-    Optional[str]
-        Path to the generated plot when a new figure was created, otherwise None.
-    """
-    created_fig = False
-    if axes is None:
-        fig, axes = plt.subplots(1, 1, figsize=(2.1, 0.7))
-        created_fig = True
-
-    t, y = dynamics.integrate_f(t_final, y_0, args, t_0=t_0, steps=steps)
-    for i in range(int(np.shape(y)[0] / 2)):
-        axes.plot(t, y[i, :],color=node_colors[i] if node_colors is not None else None, linewidth=0.5)
-
-    # aesthetics and labels
-
-    if created_fig:
-        if save_dir is None:
-            save_dir = os.path.join(os.getcwd(), "unorganized_plots")
-        return save_figure(fig, save_dir=save_dir, name=name if name is not None else "dynamics.svg")
-
-
-
-
-def plot_dynamics_scenario(t_final: float, args, model: BaseModel, y_0=None, steps=8000, meta_scenario_name="default",
-                    save_dir: Optional[str]=None, ax=None, node_colors=None):
-    """
-    Generates two panels comparing the dynamics of the network with and without vtn for a given scenario.
-
-    If axes are provided, only the unshifted plot is drawn to axes[0] and the shifted plot
-    to axes[1]. If no perturbation is provided, only the offset transient comparison is created.
-    """
-
-    # unpacking arguments
-    instance = (model.model_ode, model.model_ode_args)
-    pert = args[0:2]
-    shift = args[2:4]
-    no_perturbation = (pert[0] is None)
-
-    dim = np.shape(model.jacobian_matrix)[0]
-
-    # set y_0 to fixpoint wiht an offset if no perturbation is provided or perturbation_and_offset is True, unless y_0 is provided
-    if y_0 is None:
-        if model.fixed_point is None:
-            model.compute_fixed_point()
-        fixpoint = model.fixed_point
-        y_0 = np.zeros(model.ode_dimension)
-        y_0[:dim] = fixpoint
-    
-        # creating offset if no perturbation is provided
-        if pert[0] is None:
-            offset = np.random.rand(dim) * pert[1]
-            offset -= np.sum(offset) / dim
-            y_0[:dim] += offset
-
-    # creating figure if no axes have been provided for plotting
-    if ax is None:
-        fig,ax=plt.subplots(2,1,figsize=(3, 2), sharex=True)
-
-        # setting save_dir to current instance directory not provided as a parameter to save the generated figure
-        if save_dir is None:
-            if model.current_dir is None:
-                model.save_parameters()
-            save_dir=model.current_dir
-            save_dir=os.path.join(save_dir,"plots") 
-    else:
-        save_dir=None
-
-    # setting up shifted and unshifted cases for plotting
-    cases=[("unaltered", instance+pert+(None,None)),
-           ("shifted", instance+pert+shift)]
-    
-    # looping over cases and plotting dynamics for each case in the respective subplot
-    for i, (name, args) in enumerate(cases):
-        print("Numerically integrating case:", name)
-        y_0_case = y_0.copy()
-        plot_dynamics(t_final, y_0_case, args,
-                    axes=ax[i],
-                    t_0=0.,
-                    steps=steps,node_colors=node_colors)
-
-    # saving figure if it was created in this function, otherwise just returning the axes for further use
-    if save_dir is not None:
-        svg_path=save_figure(fig, save_dir=save_dir, name=meta_scenario_name+"_dynamics.svg")
-        png_path=os.path.join(save_dir,meta_scenario_name+"_dynamics.png")
-        svg2png(url=svg_path,write_to=png_path,
-                parent_height=110,parent_width=400,output_height=115*4,output_width=400*4)
-        return svg_path
-    else:
-        return ax
-    
-
-def plot_scenario_dynamics_split(t_final: float, args, model: BaseModel, nodes: list, y_0=None, steps=8000, meta_scenario_name="default",
-                    save_dir: Optional[str]=None, ax=None):
-    """
-    Generates two panels comparing the dynamics of the network with and without vtn for a given scenario.
-
-    If axes are provided, only the unshifted plot is drawn to axes[0] and the shifted plot
-    to axes[1]. If no perturbation is provided, only the offset transient comparison is created.
-    """
-
-    # unpacking arguments
-    instance = (model.model_ode, model.model_ode_args)
-    pert = args[0:2]
-    shift = args[2:4]
-
-    dim = np.shape(model.jacobian_matrix)[0]
-
-    # set y_0 to fixpoint wiht an offset if no perturbation is provided or perturbation_and_offset is True, unless y_0 is provided
-    if y_0 is None:
-        if model.fixed_point is None:
-            model.compute_fixed_point()
-        fixpoint = model.fixed_point
-        y_0 = np.zeros(model.ode_dimension)
-        y_0[:dim] = fixpoint
-
-    # creating figure if no axes have been provided for plotting
-    if ax is None:
-        fig,ax=plt.subplots(len(nodes),1,figsize=(3, 2), sharex=True)
-
-        # setting save_dir to current instance directory not provided as a parameter to save the generated figure
-        if save_dir is None:
-            if model.current_dir is None:
-                model.save_parameters()
-            save_dir=model.current_dir
-            save_dir=os.path.join(save_dir,"plots") 
-    else:
-        save_dir=None
-
-    # numerically integrating shifted and unshifted trajectories
-    t, ys = dynamics.integrate_f(t_final, y_0, instance+pert+(None,None), t_0=0, steps=steps)
-    t, ys_shifted = dynamics.integrate_f(t_final, y_0, instance+pert+shift, t_0=0, steps=steps)
-
-    # fix point deviation
-    ys[:len(y_0)] -= y_0[:, None]
-    ys_shifted[:len(y_0)] -= y_0[:, None]
-
-    filepath = os.path.join(shift[1][0].current_dir,meta_scenario_name)
-    np.savez(filepath, t=t, ys=ys, ys_shifted=ys_shifted)
-    traj = np.load(filepath+".npz", allow_pickle=True)
-    t_l=traj["t"]
-    ys_l=traj["ys"]
-    ys_shifted_l=traj["ys_shifted"]
-    if np.any(t_l != t) or np.any(ys!=ys_l) or np.any(ys_shifted_l != ys_shifted):
-        raise ValueError("Loaded trajectories don't equal saved trajectories!")
-
-    # min and max for consistent scaling across subplots
-    min_max= np.empty((2, len(nodes)))
-
-    # looping over nodes, plotting shifted and unshifted trajectory for each node into the respective subplot
-    for i, node in enumerate(nodes):
-        min= np.min(np.stack((ys[node, :], ys_shifted[node, :])))
-        max= np.max(np.stack((ys[node, :], ys_shifted[node, :])))
-        min_max[:, i] = (min,max)
-        ax[i].plot(t, ys[node, :], color=black, linewidth=0.5, label="unshifted")
-        ax[i].plot(t, ys_shifted[node, :], color=red, linewidth=0.5, label="shifted")
-        if i < len(nodes)-1:
-            ax[i].set_xticks([])
-
-
-    # saving figure if it was created in this function, otherwise just returning the axes for further use
-    if save_dir is not None:
-        svg_path=save_figure(fig, save_dir=save_dir, name=meta_scenario_name+"_dynamics.svg")
-        png_path=os.path.join(save_dir,meta_scenario_name+"_dynamics.png")
-        svg2png(url=svg_path,write_to=png_path,
-                parent_height=110,parent_width=400,output_height=115*4,output_width=400*4)
-        return svg_path
-    else:
-        return min_max
-    
-
-def plot_scenario(t_final: float, args, model: BaseModel, nodes: list, ax, y_0=None, steps=8000, meta_scenario_name="default",
-                    save_dir: Optional[str]=None, node_colors=None):
-    """
-    Plots for a given scenario the psd, perturbation trajectory and trajectories of the nodes w and w/o shift in a row of subplots. 
-    The psd is plotted in ax[0], the perturbation trajectory in ax[1] and the trajectories of the nodes w and w/o shift in ax[2] to ax[2+len(nodes)].
-    """
-
-    # unpacking
-    pert = args[0:2]
-    y_lims= np.empty((2, 2+len(nodes)))
-
-    # plotting hist of psd of perturbation into ax[0]
-    y_lims[:,0]=plot_scenario_psd(ax=ax[0], pert=pert, log=True)
-
-     # plotting trajectory of perturbation into ax[1]
-    y_lims[:,1]=plot_scenario_perturbation_trajectory(ax=ax[1], t_final=t_final, steps=steps, pert=pert)
-
-     # plotting trajectories of nodes w and w/o shift into ax[2] to ax[2+len(nodes)]
-    y_lims[:, 2:2+len(nodes)]=plot_scenario_dynamics_split(t_final, args, model, nodes, y_0=y_0, steps=steps, meta_scenario_name=meta_scenario_name,
-                                     ax=ax[2:2+len(nodes)])
-
-    return y_lims
-
-
-def plot_scenario_psd(ax, pert, f_min_max=(0.5, 3.5), log= True):
-    """
-    Generates a power spectrum density plot of the perturbation for a given scenario. 
-    """
-    # unpacking perturbation type and the corresponding arguments
-    perturbation_type=pert[0]
-    perturbation_args=pert[1]
-    min_max=np.array([0,0])
-
-    # checking for known perturbation types and plotting the corresponding psd into ax
-    if perturbation_type is None:
-        raise ValueError("No perturbation provided for scenario, cannot plot psd.")
-    
-    elif perturbation_type is dynamics.perturbation_from_psd:
-        noise_object=perturbation_args[0]
-        freqs = noise_object.freqs
-        psd= noise_object.psd
-        ax.plot(freqs, psd)
-        min_max=np.array([np.min(psd), np.max(psd)])
-        
-    elif perturbation_type is dynamics.sine_perturbation_single_node:
-        amplitude=perturbation_args[0]
-        frequency=perturbation_args[1]
-        freqs=np.array([frequency])
-        amps=np.array([amplitude])
-        ax.hist(freqs, amps, markersize=5)
-        ax.set_xlim(f_min_max)
-        min_max=np.array([0, amplitude*1.5])
-
-    if log:
-        ax.set_xscale("log")
-    
-    return min_max
-    
-
-
-def plot_scenario_perturbation_trajectory(ax, t_final, steps, pert):
-    """
-    Plots the trajectory of the perturbation over time for a given scenario into ax.
-    """
-    # generate time array
-    t = np.linspace(0, t_final, steps)
-
-    # unpacking perturbation type and the corresponding arguments
-    perturbation_func=pert[0]
-    perturbation_args=pert[1]
-    perturbed_node=perturbation_args[-1]
-
-    
-    # generating perturbation values from the time array
-    vals=perturbation_func(t, np.empty(perturbed_node+1), perturbation_args)[perturbed_node]
-
-    # plotting the perturbation trajectory into ax
-    ax.plot(t, vals)
-    return np.array([np.min(vals), np.max(vals)])
-
-
-def plot_scenario_comparison_split(t_final,
-                               model:sokm,
-                               shift_matrix_obj:ShiftMatrix,
-                               scenarios,
-                               nodes=[0,3,5],
-                               steps=8000,
-                               y_0=None,
-                               name="dynamics_comparison", 
-                               save_dir=None,
-                               fontsize=5,
-                               perturbed_node=1):
-
-
-    """
-    
-
-
-    Arguments:
-        scenarios: list of touples the tuples have the form (title, pert) where 
-            title: string
-                title of the scenario.
-            pert: tuple
-                of the form (perturbation, perturbation_args) that defines the perturbation for the scenario
-         """
-
-    # initializing figure
-    fig,ax=plt.subplots(2+len(nodes), len(scenarios),figsize=(7, 3), sharey="row", gridspec_kw=dict(hspace=0.1, wspace=0.1))
-    
-    # colorshemes
-    cmap=plt.cm.cividis.reversed()
-    node_colors = node_colors_from_perturbation_distance(perturbed_node, model, cmap=cmap)
-
-    # Construct shift arguments
-    shift_args = (shift_matrix_obj, model, None)
-    shift = (dynamics.jacobian_shift, shift_args)
-        
-    y_lims=np.empty((2, 2+len(nodes))) # for consistent scaling across subplots, storing min and max values of each subplot for each scenario to later set the same y limits for the respective subplots across scenarios
-    # looping over the scenarios to generate the corresponding plots
-    for i, (title, pert ) in enumerate(scenarios):
-        print(f"Generating plot for scenario: {title}")
-
-        # Call plot_dynamics_scenarios with these perturbation and shift arguments to plot the row comaptison for the scenario onto the existing axes
-        y_lims_dummy = plot_scenario(
-            t_final=t_final,
-            args=pert + shift,
-            nodes=nodes,
-            model=model,
-            y_0=y_0,
-            steps=steps,
-            meta_scenario_name=title,
-            ax=ax[:, i],
-            node_colors=node_colors
-        )
-
-        # updating y_lims if necessary
-        y_lims[0,:] = np.min(np.stack((y_lims[0,:], y_lims_dummy[0,:])), axis=0)
-        y_lims[1,:] = np.max(np.stack((y_lims[1,:], y_lims_dummy[1,:])), axis=0)
-
-        # managing x and y axis ticks and labels for aesthetics
-        ax[0,i].tick_params(
-            axis='x',          # changes apply to the x-axis
-            which='both',      # both major and minor ticks are affected
-            bottom=False,      # ticks along the bottom edge are off
-            top=False,         # ticks along the top edge are off
-            labelbottom=False)
-        ax[0,i].set_title(title, fontsize=fontsize)
-        ax[1,i].set_xlabel(r"$t$", fontsize=fontsize)
-        ax[0,i].set_xlim((0,t_final))
-        ax[1,i].set_xlim((0,t_final))
-        if i>0: #turning of y axis ticks and labels for the right two columns of plots
-            ax[1,i].tick_params(
-                axis='y',          # changes apply to the x-axis
-                which='both',      # both major and minor ticks are affected
-                left=False,      # ticks along the bottom edge are off
-                right=False)
-            ax[0,i].tick_params(
-                axis='y',          # changes apply to the x-axis
-                which='both',      # both major and minor ticks are affected
-                left=False,      # ticks along the bottom edge are off
-                right=False)
-
-    ax[0,0].set_ylabel(r"$\theta_n(t)$", fontsize=fontsize)
-    #ax[0,0].tick_params(axis='y', labelsize=fontsize)
-    #ax[1,0].tick_params(axis='y', labelsize=fontsize)
-    ax[1,0].set_ylabel(r"$\theta_{n,S}(t)$", fontsize=fontsize)
-    
-
-    # saving the composed figure as SVG and PNG
-    if save_dir is None:
-        save_dir = shift_matrix_obj.current_dir
-    svg_path=save_figure(fig, save_dir=save_dir, name=name+".svg")
-    png_path=os.path.join(save_dir,name+".png")
-    svg2png(url=svg_path,write_to=png_path,
-                parent_height=110,parent_width=400,output_height=115*4,output_width=400*4)
-    return svg_path
-
-
-
-def plot_scenario_comparison_bunched(t_final,
-                               model:sokm,
-                               shift_matrix_obj:ShiftMatrix,
-                               scenarios,
-                               steps=8000,
-                               y_0=None,
-                               name="dynamics_comparison", 
-                               save_dir=None,
-                               fontsize=5,
-                               perturbed_node=1):
-
-
-    """
-    
-
-
-    Arguments:
-        scenarios: list of touples the tuples have the form (title, pert) where 
-            title: string
-                title of the scenario.
-            pert: tuple
-                of the form (perturbation, perturbation_args) that defines the perturbation for the scenario
-         """
-
-    # initializing figure
-    fig,ax=plt.subplots(2, len(scenarios),figsize=(7, 3), sharey="row", gridspec_kw=dict(hspace=0.1, wspace=0.1))
-    
-    # colorshemes
-    cmap=plt.cm.cividis.reversed()
-    node_colors = node_colors_from_perturbation_distance(perturbed_node, model, cmap=cmap)
-
-    # Construct shift arguments
-    shift_args = (shift_matrix_obj, model, None)
-    shift = (dynamics.jacobian_shift, shift_args)
-        
-
-    # looping over the scenarios to generate the corresponding plots
-    for i, (title, pert ) in enumerate(scenarios):
-        print(f"Generating plot for scenario: {title}")
-
-        # Call plot_dynamics_scenarios with these perturbation and shift arguments to plot the row comaptison for the scenario onto the existing axes
-        ax[:,i] = plot_dynamics_scenario(
-            t_final=t_final,
-            args=pert + shift,
-            model=model,
-            y_0=y_0,
-            steps=steps,
-            meta_scenario_name=title,
-            ax=ax[:, i],
-            node_colors=node_colors
-        )
-
-        # managing x and y axis ticks and labels for aesthetics
-        ax[0,i].tick_params(
-            axis='x',          # changes apply to the x-axis
-            which='both',      # both major and minor ticks are affected
-            bottom=False,      # ticks along the bottom edge are off
-            top=False,         # ticks along the top edge are off
-            labelbottom=False)
-        ax[0,i].set_title(title, fontsize=fontsize)
-        ax[1,i].set_xlabel(r"$t$", fontsize=fontsize)
-        ax[0,i].set_xlim((0,t_final))
-        ax[1,i].set_xlim((0,t_final))
-        if i>0: #turning of y axis ticks and labels for the right two columns of plots
-            ax[1,i].tick_params(
-                axis='y',          # changes apply to the x-axis
-                which='both',      # both major and minor ticks are affected
-                left=False,      # ticks along the bottom edge are off
-                right=False)
-            ax[0,i].tick_params(
-                axis='y',          # changes apply to the x-axis
-                which='both',      # both major and minor ticks are affected
-                left=False,      # ticks along the bottom edge are off
-                right=False)
-
-    ax[0,0].set_ylabel(r"$\theta_n(t)$", fontsize=fontsize)
-    #ax[0,0].tick_params(axis='y', labelsize=fontsize)
-    #ax[1,0].tick_params(axis='y', labelsize=fontsize)
-    ax[1,0].set_ylabel(r"$\theta_{n,S}(t)$", fontsize=fontsize)
-    
-
-    # saving the composed figure as SVG and PNG
-    if save_dir is None:
-        save_dir = shift_matrix_obj.current_dir
-    svg_path=save_figure(fig, save_dir=save_dir, name=name+".svg")
-    png_path=os.path.join(save_dir,name+".png")
-    svg2png(url=svg_path,write_to=png_path,
-                parent_height=110,parent_width=400,output_height=115*4,output_width=400*4)
-    return svg_path
-
-
-
-
-def plot_noise(noise_object: dynamics.ContinuousSpectrumNoise, shift_matrix_obj:ShiftMatrix, axes=None, name="noise", save_dir=None):
-
-
-    if axes is None:
-        fig, ax = plt.subplots(1,1)
-    else:
-        ax = axes
-    times = np.arange(0, noise_object.t_max,noise_object.t_max/noise_object.steps)
-    noise = noise_object(times)
-    print("times", times)
-    print(type(noise), noise)
-    print("noise at some time", noise_object(times[0]))
-    print(noise_object.__dict__)
-    ax.plot(times, noise_object(times))
-
-    if axes is None:   
-        noise_integrated = np.cumsum(noise)
-        ax.plot(times, noise_integrated)
-        ax.set_xlabel(r"$t$")
-        ax.set_ylabel(r"power")
-        ax.set_title(name)
-        plt.show()
-
-        if save_dir is None:
-            save_dir = shift_matrix_obj.current_dir
-        svg_path=save_figure(fig, save_dir=save_dir, name=name+".svg")
-        png_path=os.path.join(save_dir,name+".png")
-        svg2png(url=svg_path,write_to=png_path,
-                parent_height=110,parent_width=400,output_height=115*4,output_width=400*4)
-
+#-----------
+# for stability analysis
 
 def plot_angles_between_eigenvectors(matrix, ax, name="angles_between_eigenvectors", title="matrix", save_dir=None,fs=8):
 
@@ -1342,8 +835,6 @@ def plot_angles_between_eigenvectors(matrix, ax, name="angles_between_eigenvecto
 
     add_pcolormesh(ax, angle_matrix, cmap=plt.cm.Reds_r, min_max=(0, np.pi/2), log=False, cutoff=1e-5, absolute=True)
     ax.set_title(title, fontsize=fs)
-
-    
 
 
 def angle_comparison(model: sokm, shift_matrix_obj: ShiftMatrix, name="angle_comparison", save_dir=None):
@@ -1371,93 +862,11 @@ def angle_comparison(model: sokm, shift_matrix_obj: ShiftMatrix, name="angle_com
             parent_height=110,parent_width=400,output_height=115*4,output_width=400*4)
 
 
-#----------------------
-# plotting utils for publication figure on dynamics
-
-
-def plot_scenario_row(t_final, 
-                      args, 
-                      model, 
-                      y_0, 
-                      axes, 
-                      nodes=[2,3], 
-                      steps=8000, 
-                      meta_scenario_name="scenario",
-                      overwrite=False, 
-                      freqs_lims=(0.5, 3.5),
-                      min_max_psd=None, 
-                      psd_vlines=None,
-                      psd_vline_colors=None,
-                      alpha=1.):
-    """
-    Generates scenario data if it can't be loaded. Then adds shift power, power spectral density and selected trajectories to the provided axes. 
-    
-    """
-
-    # load data if path provided, else generate anew
-    traj=generate_or_fetch_scenario_data(t_final, args, model, y_0=y_0, steps=steps, meta_scenario_name=meta_scenario_name, overwrite=overwrite)
-
-    # plot psd histogram of response with illustrated shifts
-    freqs, psd = compute_psd_from_traj(traj["t"], traj["ys"][:np.shape(model.jacobian_matrix)[0], :])
-    psd=np.mean(psd, axis=0)
-    freqs_vtn, psd_vtn = compute_psd_from_traj(traj["t"], traj["ys_shifted"][:np.shape(model.jacobian_matrix)[0], :])
-    psd_vtn=np.mean(psd_vtn, axis=0)
-    min_max_psd = plot_psd(axes[3],freqs,psd,freqs_vtn=freqs_vtn,psd_vtn=psd_vtn,freqs_lims=freqs_lims, min_max=min_max_psd, vlines=psd_vlines, vline_colors=psd_vline_colors)
-
-    # plot shift powers over time
-    axes[0]= plot_vtn_powers(axes[0],traj, args[3][0],model)
-
-    # plot dynamics of selected nodes
-    plot_trajectories_split(traj, axes=axes[1:1+len(nodes)], nodes=nodes, y_0=y_0, alpha=alpha)
-    return min_max_psd
-
-
-def compute_psd_from_traj(t, vals, steady_state_t=500):
-    """
-    Computes the power spectral density from a trajectory using scipy.signal.welch.
-    """
-    if np.max(t)< steady_state_t-100:
-        print(f"WARNING: The function making this print is agnostic of your chosen alpha value, however if it is 0.01 as it should be for realistic power grids," \
-                "and the transient go with e**(-alpha *t) equilibrium with transients only one percent of the original size do not occur before time ~t>460. "\
-                    "the maximum time is {np.max(t)}, so the sample size for steady-state power spectral density computation is either non existent or critically small."\
-                        "Hence the first entry considered for psd compuation is set to {np.max(t)-100}.")
-        steady_state_t= np.max(t)-100
-    steady_idx=np.argmin(np.abs(t-steady_state_t))
-    t=t[steady_idx:]
-    vals=vals[:,steady_idx:]
-    freqs, psd = scipy.signal.welch(vals, fs=1/(t[1]-t[0]), axis=-1, nperseg=len(t))
-    return freqs, psd
-
-def plot_trajectories_split(traj, axes, nodes, y_0=None, alpha=1.):
-
-    t=traj["t"]
-    ys=traj["ys"]
-    ys_shifted=traj["ys_shifted"]
-
-    if y_0 is not None:
-        ys[:len(y_0)] -= y_0[:, None]
-        ys_shifted[:len(y_0)] -= y_0[:, None]
-
-     # min and max for consistent scaling across subplots
-    for i, node in enumerate(nodes):
-        min= np.min(np.stack((ys[node, :], ys_shifted[node, :])))
-        max= np.max(np.stack((ys[node, :], ys_shifted[node, :])))
-        if i==0:
-            min_max= np.array([min,max])
-        else:
-            if min<min_max[0]:
-                min_max[0]=min
-            if max>min_max[1]:
-                min_max[1]=max
-        axes[i].plot(t, ys[node, :], color="black", linewidth=0.5, label="unshifted", alpha=alpha)
-        axes[i].plot(t, ys_shifted[node, :], color=darkblue, linewidth=0.5, label="shifted", alpha=alpha)
-        if i < len(nodes)-1:
-            axes[i].set_xticks([])
-    return min_max
-
+#-----------
+# for dynamics
 
 def generate_or_fetch_scenario_data(t_final: float, args, model: BaseModel, y_0=None, steps=8000, meta_scenario_name="default",
-                    save_dir: Optional[str]=None, overwrite=False, minus_fixpoint=False,silent=False):
+                    save_dir: Optional[str]=None, overwrite=False, minus_fixpoint=False,silent=False, euler_maruyama=False):
 
     """
     Checks if the trajectory data of the scenario (w and w/o) VTN already exists. If so it is loaded. Else generated and saved. 
@@ -1466,6 +875,7 @@ def generate_or_fetch_scenario_data(t_final: float, args, model: BaseModel, y_0=
     # unpacking arguments
     instance = (model.model_ode, model.model_ode_args)
     pert = args[0:2]
+    print("per: ", pert)
     shift = args[2:4]
 
     # checking if data already exists
@@ -1474,7 +884,12 @@ def generate_or_fetch_scenario_data(t_final: float, args, model: BaseModel, y_0=
             save_dir=model.current_dir
         else:
             save_dir=shift[1][0].current_dir
-    filepath = os.path.join(save_dir,meta_scenario_name)+"_tfinal"+str(t_final)+"_tonset"+str(int(pert[1][3]))+".npz"
+
+
+    filepath = os.path.join(save_dir,meta_scenario_name)+"_tfinal"+str(t_final)+"_tonset"+str(int(pert[1][3]))
+    if euler_maruyama:
+        filepath += "_euler_maruyama"
+    filepath += ".npz"
 
     
 
@@ -1499,7 +914,11 @@ def generate_or_fetch_scenario_data(t_final: float, args, model: BaseModel, y_0=
         y_0[:dim] = fixpoint
 
     # numerically integrating shifted and unshifted trajectories
-    t, ys = dynamics.integrate_f(t_final, y_0, instance+pert+(None,None), t_0=0, steps=steps)
+    if euler_maruyama:
+        t,ys, meta = em.use_euler_maruyama(model, [0,t_final], dt= t_final/steps, y0=y_0, pert=pert, shift_matrix_object=None, seed=42)
+        ys=ys.T
+    else:
+        t, ys = dynamics.integrate_f(t_final, y_0, instance+pert+(None,None), t_0=0, steps=steps)
     if shift[1] is not None:
         t, ys_shifted = dynamics.integrate_f(t_final, y_0, instance+pert+shift, t_0=0, steps=steps)
 
@@ -1518,79 +937,6 @@ def generate_or_fetch_scenario_data(t_final: float, args, model: BaseModel, y_0=
     
     return np.load(filepath, allow_pickle=True)
 
-
-def plot_psd(axes,freqs,psd,freqs_vtn=None,psd_vtn=None,freqs_lims=None, min_max=None, vlines=None, vline_colors=None):
-    """
-    Plots a histogram for the provided power spectral density. If psd_vtn is provided it is layered on top.
-    """
-    # updating min_max
-    if min_max is not None:
-        min_max[0]=min(min_max[0], np.min(psd),np.min(psd_vtn) if psd_vtn is not None else np.inf)
-        min_max[1]=max(min_max[1], np.max(psd),np.max(psd_vtn) if psd_vtn is not None else -np.inf)
-    else:
-        min_max=np.empty(2)
-        min_max[0]=min( np.min(psd),np.min(psd_vtn) if psd_vtn is not None else np.inf)
-        min_max[1]=max( np.max(psd),np.max(psd_vtn) if psd_vtn is not None else -np.inf)
-
-    # plotting psd hist
-    axes.plot(freqs, psd, color="grey",alpha=0.8)
-    #axes.hist(psd, bins=freqs, color="grey", alpha=0.8)
-    
-    # plotting psd_vtn if provided
-    if np.any(psd_vtn!=None) and np.any(freqs_vtn!=None):
-        axes.plot(freqs_vtn, psd_vtn, color=darkblue, alpha=0.8)
-        #axes.hist(psd_vtn, bins=freqs_vtn, color="grey", alpha=0.8)
-
-    # plotting vertical lines if provided
-    if vlines is not None and vline_colors is not None:
-        for vline, color in zip(vlines, vline_colors):
-            axes.axvline(x=vline/(2*np.pi), color=color, linestyle="--", linewidth=0.5, alpha=1.)
-
-    if freqs_lims is not None:
-        axes.set_xlim(freqs_lims)
-    #axes.set_xscale("log")
-    axes.set_ylim(bottom=1e-8)
-    axes.set_yscale("log")
-    axes.set_xlabel(r"$\omega/2\pi$ [Hz]")
-
-    return min_max
-
-    
-def plot_vtn_powers(axes, traj, shift_matrix_obj:ShiftMatrix, model: sokm, threshhold= 1e-8, absolute=False):
-    """
-    calculates the shift power of the nodes with battery energy storage systems
-    """
-
-    # fetching indices nodes where powers are applied based on the shift matrix
-    vtn_nodes= np.nonzero(np.any(shift_matrix_obj.shift_matrix > threshhold, axis=1))[0]
-
-    # fetching trajectory data and fixpoint values
-    t=traj["t"]
-    y_fixpoint=model.compute_fixed_point()
-    ys_shifted=traj["ys_shifted"][:len(y_fixpoint),:]
-
-    # compute shift power from that
-    p_vtn= (shift_matrix_obj.shift_matrix@(ys_shifted-y_fixpoint[:,None]))[vtn_nodes,:]
-    p_vtn_average= np.cumsum(p_vtn,axis=1)[:,1:]/t[None,1:] #skipping first entry in order to avoid division by zero
-
-    if absolute:
-        p_vtn_average=np.abs(p_vtn_average)
-    # bess colors
-    #colors=["orange", "blue","green","red","darkblue"]
-    colors=[]
-    # plot
-    for bess_index in range(len(vtn_nodes)):
-        #axes.plot(t,p_vtn[bess_index], color=colors[bess_index],linewidth=0.5)
-        axes.plot(t[1:],p_vtn_average[bess_index],color=colors[bess_index] if len(colors) > bess_index else orange,linewidth=0.5, alpha=0.8)
-        #plt.plot(t,p_vtn[bess_index], color=colors[bess_index])
-        #plt.plot(t[1:],p_vtn_average[bess_index], linestyle="--",color=colors[bess_index])
-        #plt.show()
-    if absolute:
-        axes.set_yscale("log")
-    axes.set_xlabel(r"$t $ [s]")
-    axes.set_ylabel(r"$\overline{P}_{VTN}$")
-    
-    return axes
 
 def load_time_series_data(file_path):
     """
@@ -1622,53 +968,6 @@ def load_time_series_data(file_path):
     
     return time_in_seconds, values
 
-def clean_time_series(time, values, method='modified_zscore', threshold=3.5):
-    """
-    Removes far outliers from synchronized time series data using robust statistical methods.
-    
-    Parameters:
-        time (np.ndarray): 1D array of time in seconds (starting from 0).
-        values (np.ndarray): 1D array of measured values.
-        method (str): Outlier detection method ('modified_zscore' or 'iqr').
-        threshold (float): Threshold for outlier detection (default 3.5 for modified_zscore, 3.0 for iqr).
-    
-    Returns:
-        clean_time (np.ndarray): Time array with outliers removed.
-        clean_values (np.ndarray): Values array with outliers removed.
-        outlier_indices (np.ndarray): Indices of detected outliers.
-    
-    Example:
-        time, values = convert_time_series('data.txt')
-        clean_time, clean_values, outliers = clean_time_series(time, values, method='iqr', threshold=3.0)
-    """
-    values = np.asarray(values)
-    time = np.asarray(time)
-    
-    if method == 'modified_zscore':
-        median = np.median(values)
-        mad = np.median(np.abs(values - median))
-        if mad == 0:
-            mad = np.mean(np.abs(values - median))  # fallback
-        modified_z_scores = 0.6745 * (values - median) / mad
-        outlier_mask = np.abs(modified_z_scores) > threshold
-    elif method == 'iqr':
-        q1 = np.percentile(values, 25)
-        q3 = np.percentile(values, 75)
-        iqr = q3 - q1
-        lower_bound = q1 - threshold * iqr
-        upper_bound = q3 + threshold * iqr
-        outlier_mask = (values < lower_bound) | (values > upper_bound)
-    else:
-        raise ValueError("method must be 'modified_zscore' or 'iqr'")
-    
-    # Indices of outliers
-    outlier_indices = np.where(outlier_mask)[0]
-    
-    # Remove outliers from both arrays
-    clean_time = np.delete(time, outlier_indices)
-    clean_values = np.delete(values, outlier_indices)
-    
-    return clean_time, clean_values, outlier_indices
 
 def time_series_and_psd(file_path,name="trajectory"):
 
@@ -1692,7 +991,23 @@ def time_series_and_psd(file_path,name="trajectory"):
     png_path=os.path.join(save_dir,name+".png")
     svg2png(url=svg_path,write_to=png_path,
                 parent_height=110,parent_width=400,output_height=115*4,output_width=400*4)
-        
+
+
+def compute_psd_from_traj(t, vals, steady_state_t=500):
+    """
+    Computes the power spectral density from a trajectory using scipy.signal.welch.
+    """
+    if np.max(t)< steady_state_t-100:
+        print(f"WARNING: The function making this print is agnostic of your chosen alpha value, however if it is 0.01 as it should be for realistic power grids," \
+                "and the transient go with e**(-alpha *t) equilibrium with transients only one percent of the original size do not occur before time ~t>460. "\
+                    "the maximum time is {np.max(t)}, so the sample size for steady-state power spectral density computation is either non existent or critically small."\
+                        "Hence the first entry considered for psd compuation is set to {np.max(t)-100}.")
+        steady_state_t= np.max(t)-100
+    steady_idx=np.argmin(np.abs(t-steady_state_t))
+    t=t[steady_idx:]
+    vals=vals[:,steady_idx:]
+    freqs, psd = scipy.signal.welch(vals, fs=1/(t[1]-t[0]), axis=-1, nperseg=len(t))
+    return freqs, psd
 
 # Example usage
 if __name__ == "__main__":
